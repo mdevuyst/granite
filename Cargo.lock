@@ -552,8 +552,11 @@ name = "granite"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "http 1.1.0",
  "pingora",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

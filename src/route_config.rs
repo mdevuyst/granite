@@ -1,18 +1,22 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub trait RouteHolder {
+    fn add_route(&mut self, route: Route);
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Origin {
     pub host: String,
     pub port: u16,
     pub protocol: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct OriginGroup {
     pub origins: Vec<Origin>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Route {
     pub customer: String,
     pub hosts: Vec<String>,

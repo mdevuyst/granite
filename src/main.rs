@@ -5,10 +5,12 @@ use pingora::apps::http_app::ServeHttp;
 use pingora::prelude::*;
 use pingora::protocols::http::ServerSession;
 use pingora::services::{listening::Service as ListeningService, Service};
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+
+mod route_config;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct CustomerConfig {
@@ -41,18 +43,14 @@ impl ServeHttp for ConfigApi {
                 .unwrap();
         }
 
-        let request_body: Option<Bytes> = match timeout(
-            Duration::from_secs(30),
-            http_stream.read_request_body(),
-        )
-        .await
-        {
-            Ok(res) => match res {
-                Ok(res) => res,
+        let request_body: Option<Bytes> =
+            match timeout(Duration::from_secs(30), http_stream.read_request_body()).await {
+                Ok(res) => match res {
+                    Ok(res) => res,
+                    Err(_) => None,
+                },
                 Err(_) => None,
-            },
-            Err(_) => None,
-        };
+            };
 
         let Some(request_body) = request_body else {
             return Response::builder()
@@ -76,7 +74,9 @@ impl ServeHttp for ConfigApi {
         let mut route_map = self.route_map.write().unwrap();
         let _ = (*route_map).insert(customer_config.host, customer_config.origin);
 
-        let response_body = format!("Current config: {:?}\n", *route_map).as_bytes().to_vec();
+        let response_body = format!("Current config: {:?}\n", *route_map)
+            .as_bytes()
+            .to_vec();
 
         Response::builder()
             .status(StatusCode::OK)

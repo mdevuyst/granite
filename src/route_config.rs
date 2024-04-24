@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-pub trait RouteHolder {
-    fn add_route(&mut self, route: Route);
+pub trait RouteHolder: Send + Sync {
+    fn add_route(&self, route: Route);
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]

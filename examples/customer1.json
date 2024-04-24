@@ -1,0 +1,29 @@
+{
+    "customer": "customer1",
+    "hosts": [
+        "example1.com",
+        "example2.com",
+        "foo.com",
+        "httpbin.org"
+    ],
+    "paths": [
+        "/"
+    ],
+    "protocols": [
+        "http"
+    ],
+    "origin_group": {
+        "origins": [
+            {
+                "host": "httpbin.org",
+                "port": 80,
+                "protocol": "http"
+            },
+            {
+                "host": "origin2.com",
+                "port": 80,
+                "protocol": "http"
+            }
+        ]
+    }
+}

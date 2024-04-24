@@ -5,27 +5,31 @@ use std::sync::Arc;
 mod config_api;
 mod proxy;
 mod route_config;
+mod route_store;
 
 use config_api::ConfigApi;
 use proxy::Proxy;
+use route_store::RouteStore;
 
 fn main() {
-    let mut my_server = Server::new(None).unwrap();
-    my_server.bootstrap();
+    env_logger::init();
+    let mut server = Server::new(None).unwrap();
+    server.bootstrap();
 
-    let proxy = Arc::new(Proxy::new());
+    let route_store = Arc::new(RouteStore::new());
 
-    let config_api = Arc::new(ConfigApi::new(proxy.clone()));
-
+    let config_api = Arc::new(ConfigApi::new(route_store.clone()));
     let mut config_api_service =
         ListeningService::new("Config API service".to_string(), config_api.clone());
-
     config_api_service.add_tcp("0.0.0.0:5000");
 
-    // TODO: Implement a proxy service.  The proxy service can take the config_api to get access to the route_map.
+    let proxy = Proxy::new(route_store.clone());
+    let mut proxy_service = http_proxy_service(&server.configuration, proxy);
+    proxy_service.add_tcp("0.0.0.0:8080");
 
-    let services: Vec<Box<dyn Service>> = vec![Box::new(config_api_service)];
-    my_server.add_services(services);
+    let services: Vec<Box<dyn Service>> =
+        vec![Box::new(config_api_service), Box::new(proxy_service)];
+    server.add_services(services);
 
-    my_server.run_forever();
+    server.run_forever();
 }

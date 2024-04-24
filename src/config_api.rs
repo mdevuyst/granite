@@ -2,6 +2,7 @@ use crate::route_config::{Route, RouteHolder};
 use async_trait::async_trait;
 use bytes::Bytes;
 use http::{Response, StatusCode};
+use log::info;
 use pingora::apps::http_app::ServeHttp;
 use pingora::prelude::*;
 use pingora::protocols::http::ServerSession;
@@ -10,7 +11,6 @@ use std::time::Duration;
 
 pub struct ConfigApi {
     route_holder: Arc<dyn RouteHolder>,
-    // route_map: RwLock<HashMap<String, String>>,
 }
 
 impl ConfigApi {
@@ -23,6 +23,7 @@ impl ConfigApi {
 impl ServeHttp for ConfigApi {
     async fn response(&self, http_stream: &mut ServerSession) -> Response<Vec<u8>> {
         if http_stream.req_header().as_ref().method != http::Method::POST {
+            info!("ConfigAPI: Received non-POST request");
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(http::header::CONTENT_TYPE, "text/html")
@@ -41,6 +42,7 @@ impl ServeHttp for ConfigApi {
             };
 
         let Some(request_body) = request_body else {
+            info!("ConfigAPI: Unable to read request body");
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(http::header::CONTENT_TYPE, "text/html")
@@ -50,6 +52,7 @@ impl ServeHttp for ConfigApi {
         };
 
         let Ok(route) = serde_json::from_slice::<Route>(&request_body) else {
+            info!("ConfigAPI: Failed to parse request body as Route");
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(http::header::CONTENT_TYPE, "text/html")
@@ -58,9 +61,13 @@ impl ServeHttp for ConfigApi {
                 .unwrap();
         };
 
+        info!(
+            "ConfigAPI: Adding route for customer: {}",
+            route.customer.as_str()
+        );
         self.route_holder.add_route(route);
 
-        let response_body = "Thanks\n".as_bytes().to_vec();
+        let response_body = "Change accepted\n".as_bytes().to_vec();
 
         Response::builder()
             .status(StatusCode::OK)

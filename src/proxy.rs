@@ -1,31 +1,21 @@
 use async_trait::async_trait;
+use log::info;
 use pingora::prelude::*;
 use pingora::proxy::{ProxyHttp, Session};
 use pingora::upstreams::peer::HttpPeer;
-use std::collections::HashMap;
-use std::sync::RwLock;
+use pingora::Error as PingoraError;
+use pingora::ErrorType as PingoraErrorType;
+use std::sync::Arc;
 
-use crate::route_config::{Route, RouteHolder};
+use crate::route_store::RouteStore;
 
 pub struct Proxy {
-    host_to_route: RwLock<HashMap<String, Route>>,
+    route_store: Arc<RouteStore>,
 }
 
 impl Proxy {
-    pub fn new() -> Proxy {
-        Proxy {
-            host_to_route: RwLock::new(HashMap::new()),
-        }
-    }
-}
-
-impl RouteHolder for Proxy {
-    // TODO: Don't clone the route. Save it and have multiple hash table entries point to it.
-    fn add_route(&mut self, route: Route) {
-        let mut host_to_route = self.host_to_route.write().unwrap();
-        for host in &route.hosts {
-            (*host_to_route).insert(host.to_string(), route.clone());
-        }
+    pub fn new(route_store: Arc<RouteStore>) -> Proxy {
+        Proxy { route_store }
     }
 }
 
@@ -34,11 +24,37 @@ impl ProxyHttp for Proxy {
     type CTX = ();
     fn new_ctx(&self) {}
 
-    async fn upstream_peer(&self, _session: &mut Session, _ctx: &mut ()) -> Result<Box<HttpPeer>> {
+    async fn upstream_peer(&self, session: &mut Session, _ctx: &mut ()) -> Result<Box<HttpPeer>> {
+        // TODO: Use proper error handling.
+        let Some(host) = session.get_header("host") else {
+            info!("Client made a request with host header");
+            return Err(PingoraError::new_down(PingoraErrorType::HTTPStatus(400)));
+        };
+        let Ok(host) = host.to_str() else {
+            info!("Client used non-ascii Host header");
+            return Err(PingoraError::new_down(PingoraErrorType::HTTPStatus(400)));
+        };
+        let Some(route) = self.route_store.get_route(host) else {
+            info!("No route found for host: {host}");
+            return Err(PingoraError::new_down(PingoraErrorType::HTTPStatus(404)));
+        };
+
+        // TODO: Implement load balancing; don't always pick the first origin.
+        let Some(origin) = route.origin_group.origins.first() else {
+            info!("No origin found for host: {host}");
+            return Err(PingoraError::new_down(PingoraErrorType::HTTPStatus(404)));
+        };
+
+        // TODO: Implement HTTPS support.
+        info!(
+            "Routing request to {}:{}",
+            origin.host.as_str(),
+            origin.port
+        );
         Ok(Box::new(HttpPeer::new(
-            ("1.0.0.1", 443),
-            true,
-            "one.one.one.one".to_string(),
+            (origin.host.as_str(), origin.port),
+            false,
+            "".to_string(),
         )))
     }
 }

@@ -1,0 +1,22 @@
+{
+    "name": "different_paths2",
+    "customer": "customer1",
+    "hosts": [
+        "different-paths.com"
+    ],
+    "paths": [
+        "/anything/a/b/"
+    ],
+    "inbound_protocols": [
+        "Http"
+    ],
+    "origin_group": {
+        "origins": [
+            {
+                "host": "httpbin.org",
+                "port": 80,
+                "protocol": "Http"
+            }
+        ]
+    }
+}

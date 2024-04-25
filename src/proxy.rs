@@ -36,12 +36,14 @@ impl ProxyHttp for Proxy {
             info!("Client used non-ascii Host header");
             return Err(PingoraError::new_down(PingoraErrorType::HTTPStatus(400)));
         };
-        // TOOD: Pass the real incoming protocol and path.
-        // For now, just hardcode these.
-        let Some(route) = self.route_store.get_route(Protocol::Http, host, "/") else {
+
+        let path = session.req_header().uri.path();
+        // TODO: Pass the actual incoming protocol. May need to infer this from the local sockaddr.
+        let Some(route) = self.route_store.get_route(Protocol::Http, host, path) else {
             info!("No route found for host: {host}");
             return Err(PingoraError::new_down(PingoraErrorType::HTTPStatus(404)));
         };
+        info!("Found route: {}", route.name);
 
         // TODO: Implement load balancing; don't always pick the first origin.
         let Some(origin) = route.origin_group.origins.first() else {

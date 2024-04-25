@@ -1,6 +1,8 @@
 use std::sync::RwLock;
 use std::{collections::HashMap, sync::Arc};
 
+use log::info;
+
 use crate::route_config::{Protocol, Route, RouteHolder};
 
 struct InnerStore {
@@ -30,8 +32,10 @@ impl RouteStore {
         }
     }
 
-    pub fn get_route(&self, protocol: Protocol, host: &str, _path: &str) -> Option<Arc<Route>> {
+    pub fn get_route(&self, protocol: Protocol, host: &str, path: &str) -> Option<Arc<Route>> {
         let inner = self.inner.read().unwrap();
+
+        // Look up the routes for the given host.
         let host_to_route = match protocol {
             Protocol::Http => &inner.http_host_to_route,
             Protocol::Https => &inner.https_host_to_route,
@@ -40,9 +44,23 @@ impl RouteStore {
         if routes.is_empty() {
             return None;
         }
-        // TODO: Search for the longest matching path among the different routes.
-        // For now, just return the first route.
-        routes.first().cloned()
+        info!("Found {} routes for host: {}", routes.len(), host);
+
+        // Find the route with the longest matching path.
+        let mut longest_path_length = 0;
+        let mut best_match_route: Option<Arc<Route>> = None;
+        for route in routes {
+            info!("Checking route {}", route.name);
+            for candidate_path in &route.paths {
+                info!("Checking if {} starts with {}", path, &candidate_path);
+                if path.starts_with(candidate_path) && candidate_path.len() > longest_path_length {
+                    longest_path_length = candidate_path.len();
+                    best_match_route = Some(route.clone());
+                }
+            }
+        }
+
+        best_match_route
     }
 }
 

@@ -22,6 +22,7 @@ impl ConfigApi {
 #[async_trait]
 impl ServeHttp for ConfigApi {
     async fn response(&self, http_stream: &mut ServerSession) -> Response<Vec<u8>> {
+        // TODO: Support both adding routes and deleting routes.  Use the URIs "/route/add" and "/route/delete".
         if http_stream.req_header().as_ref().method != http::Method::POST {
             info!("ConfigAPI: Received non-POST request");
             return Response::builder()

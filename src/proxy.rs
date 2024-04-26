@@ -137,12 +137,25 @@ impl ProxyHttp for Proxy {
 }
 
 fn get_host_header(session: &Session) -> Result<&str> {
-    // TODO: this doesn't work for HTTP/2.  Maybe search for ":authority" too?
-    session
-        .get_header(http::header::HOST)
-        .ok_or_else(|| Error::explain(HTTPStatus(400), "No host header detected"))?
-        .to_str()
-        .map_err(|_| Error::explain(HTTPStatus(400), "Non-ascii host header"))
+    let host = match session.get_header(http::header::HOST) {
+        Some(host_header) => host_header
+            .to_str()
+            .map_err(|_| Error::explain(HTTPStatus(400), "Non-ascii host header")),
+        // For HTTP/2, a host header may not be present; check the "authority" instead.
+        None => match session.req_header().uri.authority() {
+            Some(authority) => Ok(authority.as_str()),
+            None => Error::e_explain(HTTPStatus(400), "No host header or authority detected"),
+        },
+    };
+
+    // If the host contains a colon (e.g., "example.com:443"), return the part before the colon.
+    if let Ok(host) = host {
+        if let Some(index) = host.find(':') {
+            return Ok(&host[..index]);
+        }
+    }
+
+    host
 }
 
 pub fn get_incoming_protocol(session: &Session, https_ports: &[u16]) -> Result<Protocol> {

@@ -6,6 +6,7 @@ pub trait RouteHolder: Send + Sync {
     fn delete_route(&self, name: &str);
 }
 
+// TODO: See if the `http` crate already had something like this.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Hash)]
 pub enum Protocol {
     Http,

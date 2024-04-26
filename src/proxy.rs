@@ -3,8 +3,6 @@ use log::info;
 use pingora::prelude::*;
 use pingora::proxy::{ProxyHttp, Session};
 use pingora::upstreams::peer::HttpPeer;
-use pingora::Error as PingoraError;
-use pingora::ErrorType as PingoraErrorType;
 use std::sync::Arc;
 
 use crate::route_config::{Origin, Protocol, Route};
@@ -33,6 +31,44 @@ impl Proxy {
     pub fn new(route_store: Arc<RouteStore>) -> Proxy {
         Proxy { route_store }
     }
+
+    fn find_route(&self, session: &mut Session, ctx: &mut RequestContext) -> Result<()> {
+        let host = get_host_header(session)?;
+        let path = session.req_header().uri.path();
+
+        // TODO: Pass the actual incoming protocol. May need to infer this from the local sockaddr.
+        let route = self
+            .route_store
+            .get_route(Protocol::Http, host, path)
+            .ok_or_else(|| Error::explain(HTTPStatus(404), "No route found"))?;
+
+        info!(
+            "Matched route '{}' belonging to customer '{}'",
+            route.name, route.customer
+        );
+        ctx.route = Some(route);
+
+        Ok(())
+    }
+
+    fn override_host_header(
+        &self,
+        upstream_request: &mut RequestHeader,
+        ctx: &mut RequestContext,
+    ) -> Result<()> {
+        let origin = ctx.origin.as_ref().ok_or_else(|| {
+            Error::explain(
+                HTTPStatus(500),
+                "Origin should be set in upstream_request_filter",
+            )
+        })?;
+
+        if let Some(ref host_header_override) = origin.host_header_override {
+            upstream_request.insert_header("host", host_header_override)?;
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -43,54 +79,28 @@ impl ProxyHttp for Proxy {
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
-        // TODO: Use proper error handling.
-        let Some(host) = session.get_header("host") else {
-            info!("Client made a request without a host header");
-            session.respond_error(400).await;
-            return Ok(true);
-        };
-        let Ok(host) = host.to_str() else {
-            info!("Client used non-ascii Host header");
-            session.respond_error(400).await;
-            return Ok(true);
-        };
-
-        let path = session.req_header().uri.path();
-
-        // TODO: Pass the actual incoming protocol. May need to infer this from the local sockaddr.
-        let Some(route) = self.route_store.get_route(Protocol::Http, host, path) else {
-            info!("No route found for host: {host}");
-            session.respond_error(404).await;
-            return Ok(true);
-        };
-
-        info!(
-            "Matched route '{}' belonging to customer '{}'",
-            route.name, route.customer
-        );
-        ctx.route = Some(route);
-
+        self.find_route(session, ctx)?;
         Ok(false)
     }
 
     async fn upstream_peer(
         &self,
-        session: &mut Session,
+        _session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
-        let Some(ref route) = ctx.route else {
-            return Err(PingoraError::new_in(PingoraErrorType::HTTPStatus(500)));
-        };
-        // If we've gotten this far, we know that the route exists and the host header is ascii.
-        let host = session.get_header("host").unwrap().to_str().unwrap();
+        let route = ctx
+            .route
+            .as_ref()
+            .ok_or_else(|| Error::explain(HTTPStatus(500), "Missing expected route"))?;
 
         // TODO: Implement load balancing; don't always pick the first origin.
-        let Some(origin) = route.origin_group.origins.first() else {
-            info!("No origin found for host: {host}");
-            return Err(PingoraError::new_down(PingoraErrorType::HTTPStatus(404)));
-        };
+        let origin = route
+            .origin_group
+            .origins
+            .first()
+            .ok_or_else(|| Error::explain(HTTPStatus(404), "No origins in origin group"))?;
 
-        // TODO: Save a reference to the origin in the context.
+        // TODO: Save a *reference* to the origin in the context.
         ctx.origin = Some(origin.clone());
 
         info!(
@@ -117,14 +127,14 @@ impl ProxyHttp for Proxy {
         upstream_request: &mut RequestHeader,
         ctx: &mut Self::CTX,
     ) -> Result<()> {
-        let Some(ref origin) = ctx.origin else {
-            return Err(PingoraError::new_in(PingoraErrorType::HTTPStatus(500)));
-        };
-
-        if let Some(ref host_header_override) = origin.host_header_override {
-            upstream_request.insert_header("Host", host_header_override)?;
-        }
-
-        Ok(())
+        self.override_host_header(upstream_request, ctx)
     }
+}
+
+fn get_host_header(session: &Session) -> Result<&str> {
+    session
+        .get_header(http::header::HOST)
+        .ok_or_else(|| Error::explain(HTTPStatus(400), "No host header detected"))?
+        .to_str()
+        .map_err(|_| Error::explain(HTTPStatus(400), "Non-ascii host header"))
 }

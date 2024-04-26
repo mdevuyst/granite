@@ -81,12 +81,42 @@ impl RouteStore {
 
 impl RouteHolder for RouteStore {
     fn add_route(&self, route_config: RouteConfig) {
+        let mut inner = self.inner.write().unwrap();
+
+        // If a route with the same name already exists, delete it first.
+        let name = route_config.name.as_str();
+        if let Some(route) = inner.name_to_route.get(name) {
+            let route = route.clone();
+
+            for protocol in route.config.incoming_schemes.iter() {
+                let host_to_route = match protocol {
+                    IncomingScheme::Http => &mut inner.http_host_to_route,
+                    IncomingScheme::Https => &mut inner.https_host_to_route,
+                };
+                for host in &route.config.hosts {
+                    let routes = host_to_route
+                        .get_mut(host)
+                        .unwrap_or_else(|| panic!("No routes for {host}. Expected {name}"));
+                    let position = routes
+                        .iter()
+                        .position(|r| r.config.name == name)
+                        .unwrap_or_else(|| panic!("Route {name} not found for host {host}"));
+                    let _ = routes.remove(position);
+                    if routes.is_empty() {
+                        let _ = host_to_route.remove(host);
+                    }
+                }
+            }
+
+            let _ = inner.name_to_route.remove(name);
+        }
+
+        // Add the new route while still under the lock (this is important so that no reader
+        // experiences a lookup miss while a route is being changed).
         let route = Arc::new(Route {
             config: route_config,
             state: RwLock::new(RouteState::default()),
         });
-
-        let mut inner = self.inner.write().unwrap();
 
         inner
             .name_to_route

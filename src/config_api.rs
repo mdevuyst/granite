@@ -59,12 +59,9 @@ impl ConfigApi {
         };
 
         info!(
-            "Adding route {} for customer: {}",
+            "Adding route '{}' for customer '{}'",
             &route.name, &route.customer
         );
-        // TODO: Bug: if a route with the same name already exists, the route is not replaced and no warning
-        // is given (instead "Success" is returned).  We should either fail the request with a message indicating
-        // that a route with that name already exists or we should replace the route (preferred option).
         self.route_holder.add_route(route);
 
         build_response(StatusCode::OK, "Success\n")
@@ -88,7 +85,7 @@ impl ConfigApi {
             return build_response(StatusCode::BAD_REQUEST, "");
         };
 
-        info!("Deleting route {}", &route_name);
+        info!("Deleting route '{}'", &route_name);
         self.route_holder.delete_route(&route_name);
 
         build_response(StatusCode::OK, "Success\n")

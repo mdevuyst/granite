@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 pub trait RouteHolder: Send + Sync {
     fn add_route(&self, route: Route);
+    fn delete_route(&self, name: &str);
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Hash)]

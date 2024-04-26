@@ -1,7 +1,7 @@
 use std::sync::RwLock;
 use std::{collections::HashMap, sync::Arc};
 
-use log::debug;
+use log::{debug, warn};
 
 use crate::route_config::{Protocol, Route, RouteHolder};
 
@@ -66,9 +66,11 @@ impl RouteHolder for RouteStore {
     fn add_route(&self, route: Route) {
         let route = Arc::new(route);
         let mut inner = self.inner.write().unwrap();
+
         inner
             .name_to_route
             .insert(route.name.clone(), route.clone());
+
         for protocol in route.inbound_protocols.iter() {
             let host_to_route = match protocol {
                 Protocol::Http => &mut inner.http_host_to_route,
@@ -81,5 +83,37 @@ impl RouteHolder for RouteStore {
                     .push(route.clone());
             }
         }
+    }
+
+    fn delete_route(&self, name: &str) {
+        let mut inner = self.inner.write().unwrap();
+
+        let Some(route) = inner.name_to_route.get(name) else {
+            warn!("Attempted to delete a route that doesn't exis name={name}");
+            return;
+        };
+        let route = route.clone();
+
+        for protocol in route.inbound_protocols.iter() {
+            let host_to_route = match protocol {
+                Protocol::Http => &mut inner.http_host_to_route,
+                Protocol::Https => &mut inner.https_host_to_route,
+            };
+            for host in &route.hosts {
+                let routes = host_to_route
+                    .get_mut(host)
+                    .unwrap_or_else(|| panic!("No routes for {host}. Expected {name}"));
+                let position = routes
+                    .iter()
+                    .position(|r| r.name == name)
+                    .unwrap_or_else(|| panic!("Route {name} not found for host {host}"));
+                let _ = routes.remove(position);
+                if routes.is_empty() {
+                    let _ = host_to_route.remove(host);
+                }
+            }
+        }
+
+        let _ = inner.name_to_route.remove(name);
     }
 }

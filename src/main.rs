@@ -13,6 +13,13 @@ use route_store::RouteStore;
 
 fn main() {
     env_logger::init();
+
+    // TODO: Parse command-line arguments and optionally load configuration from a file.
+    // Include port numbers for the Config API and HTTP proxy services.
+    // Include default certs for HTTPS.
+    // Add the option to preload routes from a set of files.
+    // Pass some settings through to Pingora (like daemonization, logging, etc.).
+
     let mut server = Server::new(None).unwrap();
     server.bootstrap();
 

@@ -16,8 +16,8 @@
         "origins": [
             {
                 "host": "httpbin.org",
-                "port": 80,
-                "protocol": "Http",
+                "port": 443,
+                "protocol": "Https",
                 "host_header_override": "httpbin.org"
             },
             {

@@ -1,7 +1,7 @@
 use std::sync::RwLock;
 use std::{collections::HashMap, sync::Arc};
 
-use log::info;
+use log::debug;
 
 use crate::route_config::{Protocol, Route, RouteHolder};
 
@@ -44,15 +44,13 @@ impl RouteStore {
         if routes.is_empty() {
             return None;
         }
-        info!("Found {} routes for host: {}", routes.len(), host);
+        debug!("Found {} routes for host: {}", routes.len(), host);
 
         // Find the route with the longest matching path.
         let mut longest_path_length = 0;
         let mut best_match_route: Option<Arc<Route>> = None;
         for route in routes {
-            info!("Checking route {}", route.name);
             for candidate_path in &route.paths {
-                info!("Checking if {} starts with {}", path, &candidate_path);
                 if path.starts_with(candidate_path) && candidate_path.len() > longest_path_length {
                     longest_path_length = candidate_path.len();
                     best_match_route = Some(route.clone());

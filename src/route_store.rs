@@ -3,7 +3,19 @@ use std::{collections::HashMap, sync::Arc};
 
 use log::{debug, warn};
 
-use crate::route_config::{Protocol, Route, RouteHolder};
+use crate::route_config::{Protocol, RouteConfig, RouteHolder};
+
+#[derive(Debug, Default)]
+pub struct RouteState {
+    // TODO: Utilize this struct for route state.
+    pub down_endpoints: Vec<u16>,
+}
+
+#[derive(Debug, Default)]
+pub struct Route {
+    pub config: RouteConfig,
+    pub state: RwLock<RouteState>,
+}
 
 struct InnerStore {
     http_host_to_route: HashMap<String, Vec<Arc<Route>>>,
@@ -50,7 +62,7 @@ impl RouteStore {
         let mut longest_path_length = 0;
         let mut best_match_route: Option<Arc<Route>> = None;
         for route in routes {
-            for candidate_path in &route.paths {
+            for candidate_path in &route.config.paths {
                 if path.starts_with(candidate_path) && candidate_path.len() > longest_path_length {
                     longest_path_length = candidate_path.len();
                     best_match_route = Some(route.clone());
@@ -63,20 +75,24 @@ impl RouteStore {
 }
 
 impl RouteHolder for RouteStore {
-    fn add_route(&self, route: Route) {
-        let route = Arc::new(route);
+    fn add_route(&self, route_config: RouteConfig) {
+        let route = Arc::new(Route {
+            config: route_config,
+            state: RwLock::new(RouteState::default()),
+        });
+
         let mut inner = self.inner.write().unwrap();
 
         inner
             .name_to_route
-            .insert(route.name.clone(), route.clone());
+            .insert(route.config.name.clone(), route.clone());
 
-        for protocol in route.inbound_protocols.iter() {
+        for protocol in route.config.inbound_protocols.iter() {
             let host_to_route = match protocol {
                 Protocol::Http => &mut inner.http_host_to_route,
                 Protocol::Https => &mut inner.https_host_to_route,
             };
-            for host in &route.hosts {
+            for host in &route.config.hosts {
                 host_to_route
                     .entry(host.to_string())
                     .or_insert_with(Vec::new)
@@ -94,18 +110,18 @@ impl RouteHolder for RouteStore {
         };
         let route = route.clone();
 
-        for protocol in route.inbound_protocols.iter() {
+        for protocol in route.config.inbound_protocols.iter() {
             let host_to_route = match protocol {
                 Protocol::Http => &mut inner.http_host_to_route,
                 Protocol::Https => &mut inner.https_host_to_route,
             };
-            for host in &route.hosts {
+            for host in &route.config.hosts {
                 let routes = host_to_route
                     .get_mut(host)
                     .unwrap_or_else(|| panic!("No routes for {host}. Expected {name}"));
                 let position = routes
                     .iter()
-                    .position(|r| r.name == name)
+                    .position(|r| r.config.name == name)
                     .unwrap_or_else(|| panic!("Route {name} not found for host {host}"));
                 let _ = routes.remove(position);
                 if routes.is_empty() {

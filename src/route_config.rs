@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 pub trait RouteHolder: Send + Sync {
-    fn add_route(&self, route: Route);
+    fn add_route(&self, route: RouteConfig);
     fn delete_route(&self, name: &str);
 }
 
@@ -21,13 +21,13 @@ pub struct Origin {
     pub sni: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
 pub struct OriginGroup {
     pub origins: Vec<Origin>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct Route {
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
+pub struct RouteConfig {
     pub name: String,
     pub customer: String,
     pub inbound_protocols: HashSet<Protocol>,
@@ -75,10 +75,10 @@ mod tests {
             }
         }"#;
 
-        let route = serde_json::from_str::<Route>(json).unwrap();
+        let route = serde_json::from_str::<RouteConfig>(json).unwrap();
 
         assert_eq!(
-            Route {
+            RouteConfig {
                 name: "route1".to_string(),
                 customer: "customer1".to_string(),
                 inbound_protocols: HashSet::from([Protocol::Https, Protocol::Http]),

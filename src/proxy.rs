@@ -5,7 +5,8 @@ use pingora::proxy::{ProxyHttp, Session};
 use pingora::upstreams::peer::HttpPeer;
 use std::sync::Arc;
 
-use crate::route_config::{Origin, Protocol, Route};
+use crate::route_config::{Origin, Protocol};
+use crate::route_store::Route;
 use crate::route_store::RouteStore;
 
 #[derive(Debug)]
@@ -47,7 +48,7 @@ impl Proxy {
 
         info!(
             "Matched route '{}' belonging to customer '{}'",
-            route.name, route.customer
+            route.config.name, route.config.customer
         );
         ctx.route = Some(route);
 
@@ -98,6 +99,7 @@ impl ProxyHttp for Proxy {
 
         // TODO: Implement load balancing; don't always pick the first origin.
         let origin = route
+            .config
             .origin_group
             .origins
             .first()

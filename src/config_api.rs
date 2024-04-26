@@ -1,5 +1,5 @@
 use crate::cert_config::{CertBinding, CertHolder};
-use crate::route_config::{Route, RouteHolder};
+use crate::route_config::{RouteConfig, RouteHolder};
 use async_trait::async_trait;
 use http::{Response, StatusCode};
 use log::{error, info};
@@ -52,7 +52,7 @@ impl ConfigApi {
             return build_response(StatusCode::BAD_REQUEST, "");
         };
 
-        let route = serde_json::from_slice::<Route>(&request_body);
+        let route = serde_json::from_slice::<RouteConfig>(&request_body);
         let Ok(route) = route else {
             error!("Failed to parse request body as Route");
             return build_response(StatusCode::BAD_REQUEST, "");

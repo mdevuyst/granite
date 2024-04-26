@@ -10,7 +10,8 @@
         "/"
     ],
     "inbound_protocols": [
-        "Http"
+        "Http",
+        "Https"
     ],
     "origin_group": {
         "origins": [
@@ -18,7 +19,8 @@
                 "host": "httpbin.org",
                 "port": 443,
                 "protocol": "Https",
-                "host_header_override": "httpbin.org"
+                "host_header_override": "httpbin.org",
+                "sni": "httpbin.org"
             },
             {
                 "host": "origin2.com",

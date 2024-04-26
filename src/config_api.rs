@@ -24,7 +24,7 @@ impl ServeHttp for ConfigApi {
     async fn response(&self, http_stream: &mut ServerSession) -> Response<Vec<u8>> {
         // TODO: Support both adding routes and deleting routes.  Use the URIs "/route/add" and "/route/delete".
         if http_stream.req_header().as_ref().method != http::Method::POST {
-            info!("ConfigAPI: Received non-POST request");
+            info!("Received non-POST request");
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(http::header::CONTENT_TYPE, "text/html")
@@ -43,7 +43,7 @@ impl ServeHttp for ConfigApi {
             };
 
         let Some(request_body) = request_body else {
-            info!("ConfigAPI: Unable to read request body");
+            info!("Unable to read request body");
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(http::header::CONTENT_TYPE, "text/html")
@@ -53,7 +53,7 @@ impl ServeHttp for ConfigApi {
         };
 
         let Ok(route) = serde_json::from_slice::<Route>(&request_body) else {
-            info!("ConfigAPI: Failed to parse request body as Route");
+            info!("Failed to parse request body as Route");
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(http::header::CONTENT_TYPE, "text/html")
@@ -62,10 +62,7 @@ impl ServeHttp for ConfigApi {
                 .unwrap();
         };
 
-        info!(
-            "ConfigAPI: Adding route for customer: {}",
-            route.customer.as_str()
-        );
+        info!("Adding route for customer: {}", route.customer.as_str());
         self.route_holder.add_route(route);
 
         let response_body = "Change accepted\n".as_bytes().to_vec();

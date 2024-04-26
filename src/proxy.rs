@@ -25,21 +25,24 @@ impl RequestContext {
 
 pub struct Proxy {
     route_store: Arc<RouteStore>,
+    https_ports: Vec<u16>,
 }
 
 impl Proxy {
-    pub fn new(route_store: Arc<RouteStore>) -> Proxy {
-        Proxy { route_store }
+    pub fn new(route_store: Arc<RouteStore>, https_ports: &[u16]) -> Proxy {
+        Proxy {
+            route_store,
+            https_ports: https_ports.to_vec(),
+        }
     }
 
     fn find_route(&self, session: &mut Session, ctx: &mut RequestContext) -> Result<()> {
         let host = get_host_header(session)?;
         let path = session.req_header().uri.path();
-
-        // TODO: Pass the actual incoming protocol. May need to infer this from the local sockaddr.
+        let protocol = get_incoming_protocol(session, &self.https_ports)?;
         let route = self
             .route_store
-            .get_route(Protocol::Http, host, path)
+            .get_route(protocol, host, path)
             .ok_or_else(|| Error::explain(HTTPStatus(404), "No route found"))?;
 
         info!(
@@ -137,4 +140,18 @@ fn get_host_header(session: &Session) -> Result<&str> {
         .ok_or_else(|| Error::explain(HTTPStatus(400), "No host header detected"))?
         .to_str()
         .map_err(|_| Error::explain(HTTPStatus(400), "Non-ascii host header"))
+}
+
+pub fn get_incoming_protocol(session: &Session, https_ports: &[u16]) -> Result<Protocol> {
+    let server_port = session
+        .server_addr()
+        .ok_or_else(|| Error::explain(HTTPStatus(500), "No server address"))?
+        .as_inet()
+        .ok_or_else(|| Error::explain(HTTPStatus(500), "Not an inet socket"))?
+        .port();
+
+    match https_ports.contains(&server_port) {
+        true => Ok(Protocol::Https),
+        false => Ok(Protocol::Http),
+    }
 }

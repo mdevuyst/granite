@@ -13,3 +13,6 @@ target/
 # Added by cargo
 
 /target
+
+default_cert.crt
+default_cert.key

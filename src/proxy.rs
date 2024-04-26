@@ -135,6 +135,7 @@ impl ProxyHttp for Proxy {
 }
 
 fn get_host_header(session: &Session) -> Result<&str> {
+    // TODO: this doesn't work for HTTP/2.  Maybe search for ":authority" too?
     session
         .get_header(http::header::HOST)
         .ok_or_else(|| Error::explain(HTTPStatus(400), "No host header detected"))?

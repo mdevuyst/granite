@@ -14,5 +14,7 @@ target/
 
 /target
 
+/.vscode
+
 default_cert.crt
 default_cert.key

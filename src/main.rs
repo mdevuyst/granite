@@ -2,6 +2,7 @@ use cert_provider::CertProvider;
 use pingora::listeners::TlsSettings;
 use pingora::prelude::*;
 use pingora::services::{listening::Service as ListeningService, Service};
+use pingora::tls::ssl::SslVerifyMode;
 use std::sync::Arc;
 
 mod cert_config;
@@ -27,9 +28,18 @@ fn main() {
     // Add the option to preload routes from a set of files.
     // Pass some settings through to Pingora (like daemonization, logging, etc.).
 
-    let http_bind_addrs = vec!["0.0.0.0:8080".to_string()];
-    let https_bind_addrs = vec!["0.0.0.0:4433".to_string()];
+    let proxy_http_bind_addrs = vec!["0.0.0.0:8080".to_string()];
+    let proxy_https_bind_addr = vec!["0.0.0.0:4433".to_string()];
+
     let config_api_bind_addr = "0.0.0.0:5000";
+
+    // set config_api_cert_and_key_files to None to disable TLS for the Config API.
+    // let config_api_cert_and_key_files = Some(("api.crt".to_string(), "api.key".to_string()));
+    let config_api_cert_and_key_files: Option<(String, String)> = None;
+
+    // Set config_api_client_cert_file to None to disable client certificate verification.
+    // let config_api_client_cert_file = Some("client.crt".to_string());
+    let config_api_client_cert_file: Option<String> = None;
 
     let mut server = Server::new(None).unwrap();
     server.bootstrap();
@@ -40,15 +50,27 @@ fn main() {
     let config_api = Arc::new(ConfigApi::new(route_store.clone(), cert_store.clone()));
     let mut config_api_service =
         ListeningService::new("Config API service".to_string(), config_api.clone());
-    config_api_service.add_tcp(config_api_bind_addr);
 
-    let https_ports = utils::collect_ports(&https_bind_addrs);
+    if let Some((cert_file, key_file)) = config_api_cert_and_key_files.as_ref() {
+        let mut tls_settings = TlsSettings::intermediate(cert_file, key_file).unwrap();
+        tls_settings.enable_h2();
+
+        if let Some(client_cert_file) = config_api_client_cert_file {
+            tls_settings.set_ca_file(&client_cert_file).unwrap();
+            tls_settings.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+        }
+        config_api_service.add_tls_with_settings(config_api_bind_addr, None, tls_settings);
+    } else {
+        config_api_service.add_tcp(config_api_bind_addr);
+    }
+
+    let https_ports = utils::collect_ports(&proxy_https_bind_addr);
     let proxy = Proxy::new(route_store.clone(), &https_ports);
     let mut proxy_service = http_proxy_service(&server.configuration, proxy);
-    for addr in http_bind_addrs {
+    for addr in proxy_http_bind_addrs {
         proxy_service.add_tcp(&addr);
     }
-    for addr in https_bind_addrs {
+    for addr in proxy_https_bind_addr {
         let cert_provider = CertProvider::new(cert_store.clone());
         let mut tls_settings = TlsSettings::with_callbacks(cert_provider).unwrap();
         tls_settings.enable_h2();

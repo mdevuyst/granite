@@ -115,12 +115,14 @@ impl ProxyHttp for Proxy {
             // If any origins were marked down more than 10 seconds ago, unmark them.
             // First, take a read lock and check if any were marked down more than 10 seconds ago.
             // Most of the time, we shouldn't find any that need to be unmarked.
-            let state = route.state.read().unwrap();
             let mut found_expired = false;
-            for (_, &timestamp) in state.down_endpoints.iter() {
-                if timestamp.elapsed() > Duration::from_secs(10) {
-                    found_expired = true;
-                    break;
+            {
+                let state = route.state.read().unwrap();
+                for (_, &timestamp) in state.down_endpoints.iter() {
+                    if timestamp.elapsed() > Duration::from_secs(10) {
+                        found_expired = true;
+                        break;
+                    }
                 }
             }
 

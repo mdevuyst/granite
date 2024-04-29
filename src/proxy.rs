@@ -4,7 +4,9 @@ use pingora::prelude::*;
 use pingora::proxy::{ProxyHttp, Session};
 use pingora::upstreams::peer::HttpPeer;
 use rand::distributions::{Distribution, WeightedIndex};
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::route_config::{IncomingScheme, Origin, OutgoingScheme};
 use crate::route_store::Route;
@@ -14,6 +16,8 @@ use crate::route_store::RouteStore;
 pub struct RequestContext {
     route: Option<Arc<Route>>,
     origin: Option<Origin>,
+    origin_index: Option<usize>,
+    tries: u16,
 }
 
 impl RequestContext {
@@ -21,6 +25,8 @@ impl RequestContext {
         RequestContext {
             route: None,
             origin: None,
+            origin_index: None,
+            tries: 0,
         }
     }
 }
@@ -102,16 +108,69 @@ impl ProxyHttp for Proxy {
         if origins.is_empty() {
             return Error::e_explain(HTTPStatus(404), "No origins in origin group");
         }
+
+        let mut down_origins: Vec<usize> = Vec::new();
+
+        {
+            // If any origins were marked down more than 10 seconds ago, unmark them.
+            // First, take a read lock and check if any were marked down more than 10 seconds ago.
+            // Most of the time, we shouldn't find any that need to be unmarked.
+            let state = route.state.read().unwrap();
+            let mut found_expired = false;
+            for (_, &timestamp) in state.down_endpoints.iter() {
+                if timestamp.elapsed() > Duration::from_secs(10) {
+                    found_expired = true;
+                    break;
+                }
+            }
+
+            // In the rare chance that any were found, take a write lock and remove them.
+            if found_expired {
+                info!("Unmarking origin(s) that were marked down more than 10 seconds ago");
+                let mut state = route.state.write().unwrap();
+                state
+                    .down_endpoints
+                    .retain(|_, v| v.elapsed() <= Duration::from_secs(10));
+            }
+
+            // Copy the list of origins still marked down.
+            let state = route.state.read().unwrap();
+            for (&index, _) in state.down_endpoints.iter() {
+                down_origins.push(index);
+            }
+        }
+
+        // Get a list of eligible origins along with their weights.  The list of eligible origins includes
+        // all the origins that aren't marked down; Or if all origins are marked down, then all are eligible.
+        let mut eligible_origins_and_weights: Vec<(usize, u16)> = Vec::new();
+        if down_origins.len() == origins.len() {
+            info!("All origins marked down. Picking a down origin");
+            for (index, origin) in origins.iter().enumerate() {
+                eligible_origins_and_weights.push((index, origin.weight));
+            }
+        } else {
+            for (index, origin) in origins.iter().enumerate() {
+                if !down_origins.contains(&index) {
+                    eligible_origins_and_weights.push((index, origin.weight));
+                }
+            }
+        }
+
+        // Select an eligible origin randomly using the weights of all eligible origins.
         let mut rng = rand::thread_rng();
-        let weights: Vec<_> = origins.iter().map(|e| e.weight).collect();
+        let weights: Vec<_> = eligible_origins_and_weights.iter().map(|e| e.1).collect();
         let dist = WeightedIndex::new(weights)
             .or_else(|e| Error::e_because(HTTPStatus(500), "Unable to create WeightedIndex", e))?;
-        let index = dist.sample(&mut rng);
-        let origin = &origins[index];
+        let index_into_eligible_origins = dist.sample(&mut rng);
+        let index_into_all_origins = eligible_origins_and_weights[index_into_eligible_origins].0;
+        let origin = &origins[index_into_all_origins];
 
         // TODO: Save a *reference* to the origin in the context.
         ctx.origin = Some(origin.clone());
+        ctx.origin_index = Some(index_into_all_origins);
 
+        // Determine whether to connect to the origin using TLS, what port to use, what SNI to use
+        // based on the origin's configuration.
         let incoming_scheme = get_incoming_scheme(session, &self.https_ports)?;
         let use_tls = match &route.config.outgoing_scheme {
             OutgoingScheme::Http => false,
@@ -126,6 +185,10 @@ impl ProxyHttp for Proxy {
         } else {
             origin.http_port
         };
+        let sni = match origin.sni.as_ref() {
+            Some(sni) => sni.clone(),
+            None => "".to_string(),
+        };
 
         info!(
             "Routing request to {}:{}",
@@ -133,10 +196,7 @@ impl ProxyHttp for Proxy {
             outgoing_port
         );
 
-        let sni = match origin.sni.as_ref() {
-            Some(sni) => sni.clone(),
-            None => "".to_string(),
-        };
+        ctx.tries += 1;
 
         Ok(Box::new(HttpPeer::new(
             (origin.host.as_str(), outgoing_port),
@@ -152,6 +212,43 @@ impl ProxyHttp for Proxy {
         ctx: &mut Self::CTX,
     ) -> Result<()> {
         self.override_host_header(upstream_request, ctx)
+    }
+
+    fn fail_to_connect(
+        &self,
+        _session: &mut Session,
+        _peer: &HttpPeer,
+        ctx: &mut Self::CTX,
+        mut e: Box<Error>,
+    ) -> Box<Error> {
+        let Some(route) = ctx.route.as_ref() else {
+            return e;
+        };
+        let origins = &route.config.origin_group.origins;
+        if origins.is_empty() {
+            return e;
+        }
+        let Some(origin_index) = ctx.origin_index else {
+            return e;
+        };
+
+        // Mark the origin down for a while.
+        {
+            let mut state = route.state.write().unwrap();
+            if let Entry::Vacant(e) = state.down_endpoints.entry(origin_index) {
+                info!("Marking origin '{}' down", &origins[origin_index].host);
+                let _ = e.insert(Instant::now());
+            }
+        }
+
+        // Retry once.
+        if ctx.tries > 1 {
+            info!("Connection retry count exceed");
+            return e;
+        }
+        info!("Retrying connection");
+        e.set_retry(true);
+        e
     }
 }
 

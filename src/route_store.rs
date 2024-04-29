@@ -1,4 +1,5 @@
 use std::sync::RwLock;
+use std::time::Instant;
 use std::{collections::HashMap, sync::Arc};
 
 use log::{debug, warn};
@@ -8,7 +9,7 @@ use crate::route_config::{IncomingScheme, RouteConfig, RouteHolder};
 #[derive(Debug, Default)]
 pub struct RouteState {
     // TODO: Utilize this struct for route state.
-    pub down_endpoints: Vec<u16>,
+    pub down_endpoints: HashMap<usize, Instant>, // Key: index of down origin, Value: time it was marked down.
 }
 
 #[derive(Debug, Default)]

@@ -9,23 +9,24 @@
     "paths": [
         "/"
     ],
-    "inbound_protocols": [
+    "incoming_schemes": [
         "Http",
         "Https"
     ],
+    "outgoing_scheme": "MatchIncoming",
     "origin_group": {
         "origins": [
             {
                 "host": "httpbin.org",
-                "port": 443,
-                "protocol": "Https",
                 "host_header_override": "httpbin.org",
-                "sni": "httpbin.org"
+                "sni": "httpbin.org",
+                "weight": 100
             },
             {
-                "host": "origin2.com",
-                "port": 80,
-                "protocol": "Http"
+                "host": "127.0.0.1",
+                "http_port": 9000,
+                "https_port": 9001,
+                "weight": 1
             }
         ]
     }

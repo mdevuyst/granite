@@ -6,20 +6,48 @@ pub trait RouteHolder: Send + Sync {
     fn delete_route(&self, name: &str);
 }
 
-// TODO: See if the `http` crate already had something like this.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Hash)]
-pub enum Protocol {
+pub enum IncomingScheme {
     Http,
     Https,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Hash, Default)]
+pub enum OutgoingScheme {
+    Http,
+    Https,
+
+    #[default]
+    MatchIncoming,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Origin {
     pub host: String,
-    pub port: u16,
-    pub protocol: Protocol,
+
+    #[serde(default = "default_http_port")]
+    pub http_port: u16,
+
+    #[serde(default = "default_https_port")]
+    pub https_port: u16,
+
     pub host_header_override: Option<String>,
     pub sni: Option<String>,
+
+    #[serde(default = "default_weight")]
+    pub weight: u16,
+}
+
+fn default_http_port() -> u16 {
+    80
+}
+
+fn default_https_port() -> u16 {
+    443
+}
+
+fn default_weight() -> u16 {
+    10
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
@@ -31,9 +59,13 @@ pub struct OriginGroup {
 pub struct RouteConfig {
     pub name: String,
     pub customer: String,
-    pub inbound_protocols: HashSet<Protocol>,
+    pub incoming_schemes: HashSet<IncomingScheme>,
     pub hosts: Vec<String>,
     pub paths: Vec<String>,
+
+    #[serde(default)]
+    pub outgoing_scheme: OutgoingScheme,
+
     pub origin_group: OriginGroup,
 }
 
@@ -46,7 +78,7 @@ mod tests {
         let json = r#"{
             "name": "route1",
             "customer": "customer1",
-            "inbound_protocols": [
+            "incoming_schemes": [
                 "Http",
                 "Https"
             ],
@@ -57,19 +89,21 @@ mod tests {
             "paths": [
                 "/"
             ],
+            "outgoing_scheme": "MatchIncoming",
             "origin_group": {
                 "origins": [
                     {
                         "host": "origin1.com",
-                        "port": 443,
-                        "protocol": "Https",
+                        "http_port": 8080,
+                        "weight": 10,
                         "host_header_override": "foo.com",
                         "sni": "foo.com"
                     },
                     {
                         "host": "origin2.com",
-                        "port": 80,
-                        "protocol": "Http",
+                        "http_port": 8080,
+                        "https_port": 4433,
+                        "weight": 20,
                         "sni": null
                     }
                 ]
@@ -82,22 +116,25 @@ mod tests {
             RouteConfig {
                 name: "route1".to_string(),
                 customer: "customer1".to_string(),
-                inbound_protocols: HashSet::from([Protocol::Https, Protocol::Http]),
+                incoming_schemes: HashSet::from([IncomingScheme::Https, IncomingScheme::Http]),
                 hosts: vec!["example1.com".to_string(), "example2.com".to_string()],
                 paths: vec!["/".to_string()],
+                outgoing_scheme: OutgoingScheme::MatchIncoming,
                 origin_group: OriginGroup {
                     origins: vec![
                         Origin {
                             host: "origin1.com".to_string(),
-                            port: 443,
-                            protocol: Protocol::Https,
+                            http_port: 8080,
+                            https_port: 443,
+                            weight: 10,
                             host_header_override: Some("foo.com".to_string()),
                             sni: Some("foo.com".to_string()),
                         },
                         Origin {
                             host: "origin2.com".to_string(),
-                            port: 80,
-                            protocol: Protocol::Http,
+                            http_port: 8080,
+                            https_port: 4433,
+                            weight: 20,
                             host_header_override: None,
                             sni: None,
                         },

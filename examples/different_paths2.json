@@ -7,15 +7,13 @@
     "paths": [
         "/anything/a/b/"
     ],
-    "inbound_protocols": [
+    "incoming_schemes": [
         "Http"
     ],
     "origin_group": {
         "origins": [
             {
-                "host": "httpbin.org",
-                "port": 80,
-                "protocol": "Http"
+                "host": "httpbin.org"
             }
         ]
     }

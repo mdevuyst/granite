@@ -3,9 +3,10 @@ use log::info;
 use pingora::prelude::*;
 use pingora::proxy::{ProxyHttp, Session};
 use pingora::upstreams::peer::HttpPeer;
+use rand::distributions::{Distribution, WeightedIndex};
 use std::sync::Arc;
 
-use crate::route_config::{Origin, Protocol};
+use crate::route_config::{IncomingScheme, Origin, OutgoingScheme};
 use crate::route_store::Route;
 use crate::route_store::RouteStore;
 
@@ -40,7 +41,7 @@ impl Proxy {
     fn find_route(&self, session: &mut Session, ctx: &mut RequestContext) -> Result<()> {
         let host = get_host_header(session)?;
         let path = session.req_header().uri.path();
-        let protocol = get_incoming_protocol(session, &self.https_ports)?;
+        let protocol = get_incoming_scheme(session, &self.https_ports)?;
         let route = self
             .route_store
             .get_route(protocol, host, path)
@@ -89,7 +90,7 @@ impl ProxyHttp for Proxy {
 
     async fn upstream_peer(
         &self,
-        _session: &mut Session,
+        session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
         let route = ctx
@@ -97,21 +98,39 @@ impl ProxyHttp for Proxy {
             .as_ref()
             .ok_or_else(|| Error::explain(HTTPStatus(500), "Missing expected route"))?;
 
-        // TODO: Implement load balancing; don't always pick the first origin.
-        let origin = route
-            .config
-            .origin_group
-            .origins
-            .first()
-            .ok_or_else(|| Error::explain(HTTPStatus(404), "No origins in origin group"))?;
+        let origins = &route.config.origin_group.origins;
+        if origins.is_empty() {
+            return Error::e_explain(HTTPStatus(404), "No origins in origin group");
+        }
+        let mut rng = rand::thread_rng();
+        let weights: Vec<_> = origins.iter().map(|e| e.weight).collect();
+        let dist = WeightedIndex::new(weights)
+            .or_else(|e| Error::e_because(HTTPStatus(500), "Unable to create WeightedIndex", e))?;
+        let index = dist.sample(&mut rng);
+        let origin = &origins[index];
 
         // TODO: Save a *reference* to the origin in the context.
         ctx.origin = Some(origin.clone());
 
+        let incoming_scheme = get_incoming_scheme(session, &self.https_ports)?;
+        let use_tls = match &route.config.outgoing_scheme {
+            OutgoingScheme::Http => false,
+            OutgoingScheme::Https => true,
+            OutgoingScheme::MatchIncoming => match &incoming_scheme {
+                IncomingScheme::Http => false,
+                IncomingScheme::Https => true,
+            },
+        };
+        let outgoing_port = if use_tls {
+            origin.https_port
+        } else {
+            origin.http_port
+        };
+
         info!(
             "Routing request to {}:{}",
             origin.host.as_str(),
-            origin.port
+            outgoing_port
         );
 
         let sni = match origin.sni.as_ref() {
@@ -120,8 +139,8 @@ impl ProxyHttp for Proxy {
         };
 
         Ok(Box::new(HttpPeer::new(
-            (origin.host.as_str(), origin.port),
-            origin.protocol == Protocol::Https,
+            (origin.host.as_str(), outgoing_port),
+            use_tls,
             sni,
         )))
     }
@@ -158,7 +177,7 @@ fn get_host_header(session: &Session) -> Result<&str> {
     host
 }
 
-pub fn get_incoming_protocol(session: &Session, https_ports: &[u16]) -> Result<Protocol> {
+pub fn get_incoming_scheme(session: &Session, https_ports: &[u16]) -> Result<IncomingScheme> {
     let server_port = session
         .server_addr()
         .ok_or_else(|| Error::explain(HTTPStatus(500), "No server address"))?
@@ -167,7 +186,7 @@ pub fn get_incoming_protocol(session: &Session, https_ports: &[u16]) -> Result<P
         .port();
 
     match https_ports.contains(&server_port) {
-        true => Ok(Protocol::Https),
-        false => Ok(Protocol::Http),
+        true => Ok(IncomingScheme::Https),
+        false => Ok(IncomingScheme::Http),
     }
 }

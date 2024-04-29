@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use log::{debug, warn};
 
-use crate::route_config::{Protocol, RouteConfig, RouteHolder};
+use crate::route_config::{IncomingScheme, RouteConfig, RouteHolder};
 
 #[derive(Debug, Default)]
 pub struct RouteState {
@@ -44,13 +44,18 @@ impl RouteStore {
         }
     }
 
-    pub fn get_route(&self, protocol: Protocol, host: &str, path: &str) -> Option<Arc<Route>> {
+    pub fn get_route(
+        &self,
+        protocol: IncomingScheme,
+        host: &str,
+        path: &str,
+    ) -> Option<Arc<Route>> {
         let inner = self.inner.read().unwrap();
 
         // Look up the routes for the given host.
         let host_to_route = match protocol {
-            Protocol::Http => &inner.http_host_to_route,
-            Protocol::Https => &inner.https_host_to_route,
+            IncomingScheme::Http => &inner.http_host_to_route,
+            IncomingScheme::Https => &inner.https_host_to_route,
         };
         let routes = host_to_route.get(host)?;
         if routes.is_empty() {
@@ -87,10 +92,10 @@ impl RouteHolder for RouteStore {
             .name_to_route
             .insert(route.config.name.clone(), route.clone());
 
-        for protocol in route.config.inbound_protocols.iter() {
+        for protocol in route.config.incoming_schemes.iter() {
             let host_to_route = match protocol {
-                Protocol::Http => &mut inner.http_host_to_route,
-                Protocol::Https => &mut inner.https_host_to_route,
+                IncomingScheme::Http => &mut inner.http_host_to_route,
+                IncomingScheme::Https => &mut inner.https_host_to_route,
             };
             for host in &route.config.hosts {
                 host_to_route
@@ -110,10 +115,10 @@ impl RouteHolder for RouteStore {
         };
         let route = route.clone();
 
-        for protocol in route.config.inbound_protocols.iter() {
+        for protocol in route.config.incoming_schemes.iter() {
             let host_to_route = match protocol {
-                Protocol::Http => &mut inner.http_host_to_route,
-                Protocol::Https => &mut inner.https_host_to_route,
+                IncomingScheme::Http => &mut inner.http_host_to_route,
+                IncomingScheme::Https => &mut inner.https_host_to_route,
             };
             for host in &route.config.hosts {
                 let routes = host_to_route

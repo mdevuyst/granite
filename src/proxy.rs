@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use log::info;
+use log::{info, warn};
 use once_cell::sync::{Lazy, OnceCell};
 use pingora::cache::cache_control::CacheControl;
 use pingora::cache::eviction::simple_lru;
@@ -54,7 +54,7 @@ impl Proxy {
     pub fn new(route_store: Arc<RouteStore>, https_ports: &[u16], max_cache_size: usize) -> Proxy {
         let eviction_manager = simple_lru::Manager::new(max_cache_size);
         if EVICTION_MANAGER.set(eviction_manager).is_err() {
-            panic!("Unable to initialize eviction manager");
+            warn!("Eviction manager has already been initialized");
         }
         Proxy {
             route_store,

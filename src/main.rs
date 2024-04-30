@@ -41,6 +41,8 @@ fn main() {
     // let config_api_client_cert_file = Some("client.crt".to_string());
     let config_api_client_cert_file: Option<String> = None;
 
+    let max_cache_size: usize = 100 * 1024 * 1024; // 100 MB
+
     let mut server = Server::new(None).unwrap();
     server.bootstrap();
 
@@ -65,7 +67,7 @@ fn main() {
     }
 
     let https_ports = utils::collect_ports(&proxy_https_bind_addr);
-    let proxy = Proxy::new(route_store.clone(), &https_ports);
+    let proxy = Proxy::new(route_store.clone(), &https_ports, max_cache_size);
     let mut proxy_service = http_proxy_service(&server.configuration, proxy);
     for addr in proxy_http_bind_addrs {
         proxy_service.add_tcp(&addr);

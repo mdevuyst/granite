@@ -64,6 +64,9 @@ pub struct RouteConfig {
     pub paths: Vec<String>,
 
     #[serde(default)]
+    pub cache: bool,
+
+    #[serde(default)]
     pub outgoing_scheme: OutgoingScheme,
 
     pub origin_group: OriginGroup,
@@ -119,6 +122,7 @@ mod tests {
                 incoming_schemes: HashSet::from([IncomingScheme::Https, IncomingScheme::Http]),
                 hosts: vec!["example1.com".to_string(), "example2.com".to_string()],
                 paths: vec!["/".to_string()],
+                cache: false,
                 outgoing_scheme: OutgoingScheme::MatchIncoming,
                 origin_group: OriginGroup {
                     origins: vec![

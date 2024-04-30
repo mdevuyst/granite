@@ -633,6 +633,7 @@ dependencies = [
  "env_logger",
  "http 1.1.0",
  "log",
+ "once_cell",
  "pingora",
  "rand",
  "serde",

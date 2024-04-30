@@ -1,5 +1,13 @@
 use async_trait::async_trait;
 use log::info;
+use once_cell::sync::{Lazy, OnceCell};
+use pingora::cache::cache_control::CacheControl;
+use pingora::cache::eviction::simple_lru;
+use pingora::cache::filters::resp_cacheable;
+use pingora::cache::{
+    lock::CacheLock, CacheMetaDefaults, CachePhase, MemCache, NoCacheReason, RespCacheable,
+};
+use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora::proxy::{ProxyHttp, Session};
 use pingora::upstreams::peer::HttpPeer;
@@ -11,6 +19,12 @@ use std::time::{Duration, Instant};
 use crate::route_config::{IncomingScheme, Origin, OutgoingScheme};
 use crate::route_store::Route;
 use crate::route_store::RouteStore;
+
+static CACHE_BACKEND: Lazy<MemCache> = Lazy::new(MemCache::new);
+const CACHE_META_DEFAULTS: CacheMetaDefaults = CacheMetaDefaults::new(|_| Some(300), 1, 1);
+static EVICTION_MANAGER: OnceCell<simple_lru::Manager> = OnceCell::new();
+static CACHE_LOCK: Lazy<CacheLock> =
+    Lazy::new(|| CacheLock::new(std::time::Duration::from_secs(2)));
 
 #[derive(Debug)]
 pub struct RequestContext {
@@ -37,7 +51,11 @@ pub struct Proxy {
 }
 
 impl Proxy {
-    pub fn new(route_store: Arc<RouteStore>, https_ports: &[u16]) -> Proxy {
+    pub fn new(route_store: Arc<RouteStore>, https_ports: &[u16], max_cache_size: usize) -> Proxy {
+        let eviction_manager = simple_lru::Manager::new(max_cache_size);
+        if EVICTION_MANAGER.set(eviction_manager).is_err() {
+            panic!("Unable to initialize eviction manager");
+        }
         Proxy {
             route_store,
             https_ports: https_ports.to_vec(),
@@ -207,6 +225,23 @@ impl ProxyHttp for Proxy {
         )))
     }
 
+    fn request_cache_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<()> {
+        let Some(route) = &ctx.route else {
+            return Ok(());
+        };
+        if !route.config.cache {
+            return Ok(());
+        }
+
+        session.cache.enable(
+            &*CACHE_BACKEND,
+            Some(EVICTION_MANAGER.get().unwrap()),
+            None,
+            Some(&*CACHE_LOCK),
+        );
+        Ok(())
+    }
+
     async fn upstream_request_filter(
         &self,
         _session: &mut Session,
@@ -251,6 +286,51 @@ impl ProxyHttp for Proxy {
         info!("Retrying connection");
         e.set_retry(true);
         e
+    }
+
+    fn response_cache_filter(
+        &self,
+        _session: &Session,
+        resp: &ResponseHeader,
+        _ctx: &mut Self::CTX,
+    ) -> Result<RespCacheable> {
+        let cc = CacheControl::from_resp_headers(resp);
+        Ok(resp_cacheable(
+            cc.as_ref(),
+            resp,
+            false,
+            &CACHE_META_DEFAULTS,
+        ))
+    }
+
+    async fn response_filter(
+        &self,
+        session: &mut Session,
+        upstream_response: &mut ResponseHeader,
+        _ctx: &mut Self::CTX,
+    ) -> Result<()>
+    where
+        Self::CTX: Send + Sync,
+    {
+        let cache_status = if session.cache.enabled() {
+            match session.cache.phase() {
+                CachePhase::Hit => "hit",
+                CachePhase::Miss => "miss",
+                CachePhase::Stale => "stale",
+                CachePhase::Expired => "expired",
+                CachePhase::Revalidated | CachePhase::RevalidatedNoCache(_) => "revalidated",
+                _ => "invalid",
+            }
+        } else {
+            match session.cache.phase() {
+                CachePhase::Disabled(NoCacheReason::Deferred) => "deferred",
+                _ => "no-cache",
+            }
+        };
+
+        info!("Cache status: {}", cache_status);
+        upstream_response.insert_header("x-cache-status", cache_status)?;
+        Ok(())
     }
 }
 

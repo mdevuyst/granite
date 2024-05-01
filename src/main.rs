@@ -4,7 +4,6 @@ use pingora::prelude::*;
 use pingora::services::{listening::Service as ListeningService, Service};
 use pingora::tls::ssl::SslVerifyMode;
 use std::sync::Arc;
-use structopt::StructOpt;
 
 mod app_config;
 mod cert_config;
@@ -25,7 +24,7 @@ use route_store::RouteStore;
 fn main() {
     env_logger::init();
 
-    let opt = Opt::from_args();
+    let opt = Opt::default();
     let conf_file = opt.conf.as_ref().map(|p| p.to_string());
     let conf = match conf_file.as_ref() {
         // TODO: Check that the file exists before trying to load it.  If it doesn't exist, print

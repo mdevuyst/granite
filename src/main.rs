@@ -1,4 +1,3 @@
-use cert_provider::CertProvider;
 use pingora::listeners::TlsSettings;
 use pingora::prelude::*;
 use pingora::services::{listening::Service as ListeningService, Service};
@@ -6,17 +5,15 @@ use pingora::tls::ssl::SslVerifyMode;
 use std::sync::Arc;
 
 mod app_config;
-mod cert_config;
-mod cert_provider;
-mod cert_store;
+mod cert;
 mod config_api;
 mod proxy;
 mod route_config;
 mod route_store;
 mod utils;
 
+use crate::cert::{cert_provider::CertProvider, cert_store::CertStore};
 use app_config::{ApiConfig, AppConfig};
-use cert_store::CertStore;
 use config_api::ConfigApi;
 use proxy::Proxy;
 use route_store::RouteStore;

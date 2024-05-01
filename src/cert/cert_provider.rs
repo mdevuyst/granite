@@ -1,4 +1,4 @@
-use crate::cert_store::CertStore;
+use crate::cert::cert_store::CertStore;
 use async_trait::async_trait;
 use log::error;
 use pingora::listeners::TlsAccept;

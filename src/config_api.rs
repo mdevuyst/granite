@@ -1,4 +1,4 @@
-use crate::cert_config::{CertBinding, CertHolder};
+use crate::cert::cert_config::{CertBinding, CertHolder};
 use crate::route_config::{RouteConfig, RouteHolder};
 use async_trait::async_trait;
 use http::{Response, StatusCode};

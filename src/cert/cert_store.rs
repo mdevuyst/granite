@@ -1,4 +1,4 @@
-use crate::cert_config::CertHolder;
+use crate::cert::cert_config::CertHolder;
 use pingora::tls::pkey::{PKey, Private};
 use pingora::tls::x509::X509;
 use std::sync::RwLock;

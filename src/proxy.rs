@@ -16,9 +16,11 @@ use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::app_config::{CacheConfig, ProxyConfig};
 use crate::route_config::{IncomingScheme, Origin, OutgoingScheme};
 use crate::route_store::Route;
 use crate::route_store::RouteStore;
+use crate::utils;
 
 static CACHE_BACKEND: Lazy<MemCache> = Lazy::new(MemCache::new);
 const CACHE_META_DEFAULTS: CacheMetaDefaults = CacheMetaDefaults::new(|_| Some(300), 1, 1);
@@ -51,14 +53,21 @@ pub struct Proxy {
 }
 
 impl Proxy {
-    pub fn new(route_store: Arc<RouteStore>, https_ports: &[u16], max_cache_size: usize) -> Proxy {
-        let eviction_manager = simple_lru::Manager::new(max_cache_size);
+    pub fn new(
+        proxy_config: &ProxyConfig,
+        cache_config: &CacheConfig,
+        route_store: Arc<RouteStore>,
+    ) -> Proxy {
+        let https_ports = utils::collect_ports(&proxy_config.https_bind_addrs);
+
+        let eviction_manager = simple_lru::Manager::new(cache_config.max_size);
         if EVICTION_MANAGER.set(eviction_manager).is_err() {
             warn!("Eviction manager has already been initialized");
         }
+
         Proxy {
             route_store,
-            https_ports: https_ports.to_vec(),
+            https_ports,
         }
     }
 

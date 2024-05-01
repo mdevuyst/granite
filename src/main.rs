@@ -4,7 +4,9 @@ use pingora::prelude::*;
 use pingora::services::{listening::Service as ListeningService, Service};
 use pingora::tls::ssl::SslVerifyMode;
 use std::sync::Arc;
+use structopt::StructOpt;
 
+mod app_config;
 mod cert_config;
 mod cert_provider;
 mod cert_store;
@@ -14,6 +16,7 @@ mod route_config;
 mod route_store;
 mod utils;
 
+use app_config::{ApiConfig, AppConfig};
 use cert_store::CertStore;
 use config_api::ConfigApi;
 use proxy::Proxy;
@@ -22,66 +25,67 @@ use route_store::RouteStore;
 fn main() {
     env_logger::init();
 
-    // TODO: Parse command-line arguments and optionally load configuration from a file.
-    // Include port numbers for the Config API and HTTP proxy services.
-    // Include default certs for HTTPS.
-    // Add the option to preload routes from a set of files.
-    // Pass some settings through to Pingora (like daemonization, logging, etc.).
+    let opt = Opt::from_args();
+    let conf_file = opt.conf.as_ref().map(|p| p.to_string());
+    let conf = match conf_file.as_ref() {
+        // TODO: Check that the file exists before trying to load it.  If it doesn't exist, print
+        // an error message and exit.
+        Some(file) => AppConfig::load_from_yaml(file).unwrap(),
+        None => AppConfig::default(),
+    };
 
-    let proxy_http_bind_addrs = vec!["0.0.0.0:8080".to_string()];
-    let proxy_https_bind_addr = vec!["0.0.0.0:4433".to_string()];
-
-    let config_api_bind_addr = "0.0.0.0:5000";
-
-    // set config_api_cert_and_key_files to None to disable TLS for the Config API.
-    // let config_api_cert_and_key_files = Some(("api.crt".to_string(), "api.key".to_string()));
-    let config_api_cert_and_key_files: Option<(String, String)> = None;
-
-    // Set config_api_client_cert_file to None to disable client certificate verification.
-    // let config_api_client_cert_file = Some("client.crt".to_string());
-    let config_api_client_cert_file: Option<String> = None;
-
-    let max_cache_size: usize = 100 * 1024 * 1024; // 100 MB
-
-    let mut server = Server::new(None).unwrap();
+    let mut server = Server::new(Some(opt)).unwrap();
     server.bootstrap();
 
     let route_store = Arc::new(RouteStore::new());
     let cert_store = Arc::new(CertStore::new());
 
-    let config_api = Arc::new(ConfigApi::new(route_store.clone(), cert_store.clone()));
-    let mut config_api_service =
-        ListeningService::new("Config API service".to_string(), config_api.clone());
+    let config_api_service = create_config_api(&conf.api, route_store.clone(), cert_store.clone());
 
-    if let Some((cert_file, key_file)) = config_api_cert_and_key_files.as_ref() {
-        let mut tls_settings = TlsSettings::intermediate(cert_file, key_file).unwrap();
-        tls_settings.enable_h2();
-
-        if let Some(client_cert_file) = config_api_client_cert_file {
-            tls_settings.set_ca_file(&client_cert_file).unwrap();
-            tls_settings.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
-        }
-        config_api_service.add_tls_with_settings(config_api_bind_addr, None, tls_settings);
-    } else {
-        config_api_service.add_tcp(config_api_bind_addr);
-    }
-
-    let https_ports = utils::collect_ports(&proxy_https_bind_addr);
-    let proxy = Proxy::new(route_store.clone(), &https_ports, max_cache_size);
+    let proxy = Proxy::new(&conf.proxy, &conf.cache, route_store.clone());
     let mut proxy_service = http_proxy_service(&server.configuration, proxy);
-    for addr in proxy_http_bind_addrs {
-        proxy_service.add_tcp(&addr);
+    for addr in &conf.proxy.http_bind_addrs {
+        proxy_service.add_tcp(addr);
     }
-    for addr in proxy_https_bind_addr {
+    for addr in &conf.proxy.https_bind_addrs {
         let cert_provider = CertProvider::new(cert_store.clone());
         let mut tls_settings = TlsSettings::with_callbacks(cert_provider).unwrap();
         tls_settings.enable_h2();
-        proxy_service.add_tls_with_settings(&addr, None, tls_settings);
+        proxy_service.add_tls_with_settings(addr, None, tls_settings);
     }
 
-    let services: Vec<Box<dyn Service>> =
-        vec![Box::new(config_api_service), Box::new(proxy_service)];
+    let services: Vec<Box<dyn Service>> = vec![config_api_service, Box::new(proxy_service)];
     server.add_services(services);
 
     server.run_forever();
+}
+
+fn create_config_api(
+    api_config: &ApiConfig,
+    route_store: Arc<RouteStore>,
+    cert_store: Arc<CertStore>,
+) -> Box<dyn Service> {
+    let config_api = Arc::new(ConfigApi::new(route_store, cert_store));
+    let mut config_api_service =
+        ListeningService::new("Config API service".to_string(), config_api.clone());
+
+    if api_config.tls {
+        let cert_file = api_config.cert.as_ref().unwrap();
+        let key_file = api_config.key.as_ref().unwrap();
+
+        let mut tls_settings = TlsSettings::intermediate(cert_file, key_file).unwrap();
+        tls_settings.enable_h2();
+
+        if api_config.mutual_tls {
+            let client_cert_file = api_config.client_cert.as_ref().unwrap();
+            tls_settings.set_ca_file(client_cert_file).unwrap();
+            tls_settings.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+        }
+
+        config_api_service.add_tls_with_settings(api_config.bind_addr.as_str(), None, tls_settings);
+    } else {
+        config_api_service.add_tcp(api_config.bind_addr.as_str());
+    }
+
+    Box::new(config_api_service)
 }

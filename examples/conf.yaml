@@ -1,0 +1,16 @@
+# Threads per service.
+threads: 2
+
+proxy:
+  http_bind_addrs:
+  - 0.0.0.0:8080
+  https_bind_addrs:
+  - 0.0.0.0:4433
+
+api:
+  tls: true
+  cert: api.crt
+  key: api.key
+
+cache:
+  max_size: 100000000

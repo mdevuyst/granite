@@ -107,30 +107,8 @@ impl Proxy {
 
         Ok(())
     }
-}
 
-#[async_trait]
-impl ProxyHttp for Proxy {
-    type CTX = RequestContext;
-    fn new_ctx(&self) -> Self::CTX {
-        RequestContext::new()
-    }
-
-    async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
-        self.find_route(session, ctx)?;
-        Ok(false)
-    }
-
-    async fn upstream_peer(
-        &self,
-        session: &mut Session,
-        ctx: &mut Self::CTX,
-    ) -> Result<Box<HttpPeer>> {
-        let route = ctx
-            .route
-            .as_ref()
-            .ok_or_else(|| Error::explain(HTTPStatus(500), "Missing expected route"))?;
-
+    fn select_origin(&self, route: &Arc<Route>) -> Result<usize> {
         let origins = &route.config.origin_group.origins;
         if origins.is_empty() {
             return Error::e_explain(HTTPStatus(404), "No origins in origin group");
@@ -191,12 +169,38 @@ impl ProxyHttp for Proxy {
         let dist = WeightedIndex::new(weights)
             .or_else(|e| Error::e_because(HTTPStatus(500), "Unable to create WeightedIndex", e))?;
         let index_into_eligible_origins = dist.sample(&mut rng);
-        let index_into_all_origins = eligible_origins_and_weights[index_into_eligible_origins].0;
-        let origin = &origins[index_into_all_origins];
+        Ok(eligible_origins_and_weights[index_into_eligible_origins].0)
+    }
+}
+
+#[async_trait]
+impl ProxyHttp for Proxy {
+    type CTX = RequestContext;
+    fn new_ctx(&self) -> Self::CTX {
+        RequestContext::new()
+    }
+
+    async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
+        self.find_route(session, ctx)?;
+        Ok(false)
+    }
+
+    async fn upstream_peer(
+        &self,
+        session: &mut Session,
+        ctx: &mut Self::CTX,
+    ) -> Result<Box<HttpPeer>> {
+        let route = ctx
+            .route
+            .as_ref()
+            .ok_or_else(|| Error::explain(HTTPStatus(500), "Missing expected route"))?;
+
+        let origin_index = self.select_origin(route)?;
+        let origin = &route.config.origin_group.origins[origin_index];
 
         // TODO: Save a *reference* to the origin in the context.
         ctx.origin = Some(origin.clone());
-        ctx.origin_index = Some(index_into_all_origins);
+        ctx.origin_index = Some(origin_index);
 
         // Determine whether to connect to the origin using TLS, what port to use, what SNI to use
         // based on the origin's configuration.

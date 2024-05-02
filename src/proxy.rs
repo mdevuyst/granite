@@ -1,11 +1,11 @@
+//! The caching proxy.
+
 use async_trait::async_trait;
 use log::{info, warn};
 use once_cell::sync::{Lazy, OnceCell};
-use pingora::cache::cache_control::CacheControl;
-use pingora::cache::eviction::simple_lru;
-use pingora::cache::filters::resp_cacheable;
 use pingora::cache::{
-    lock::CacheLock, CacheMetaDefaults, CachePhase, MemCache, NoCacheReason, RespCacheable,
+    cache_control::CacheControl, eviction::simple_lru, filters::resp_cacheable, lock::CacheLock,
+    CacheMetaDefaults, CachePhase, MemCache, NoCacheReason, RespCacheable,
 };
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
@@ -23,16 +23,23 @@ use crate::route_store::RouteStore;
 use crate::utils;
 
 static CACHE_BACKEND: Lazy<MemCache> = Lazy::new(MemCache::new);
+/// By default, cache all responses for 5 minutes.  This can be overridden by the origin's cache
+/// control headers.
 const CACHE_META_DEFAULTS: CacheMetaDefaults = CacheMetaDefaults::new(|_| Some(300), 1, 1);
 static EVICTION_MANAGER: OnceCell<simple_lru::Manager> = OnceCell::new();
 static CACHE_LOCK: Lazy<CacheLock> =
     Lazy::new(|| CacheLock::new(std::time::Duration::from_secs(2)));
 
+/// A context that is available throughout the lifecycle of a request.
 #[derive(Debug)]
 pub struct RequestContext {
+    /// The route that was matched for the request.
     route: Option<Arc<Route>>,
+    /// The origin that was selected for the request.
     origin: Option<Origin>,
+    /// The index of the origin that was selected for the request.
     origin_index: Option<usize>,
+    /// The number of attempts to connect to an origin.
     tries: u16,
 }
 
@@ -48,8 +55,17 @@ impl RequestContext {
 }
 
 pub struct Proxy {
+    /// A means to look up routes.
     route_store: Arc<RouteStore>,
+
+    /// The ports that are used for HTTPS.
     https_ports: Vec<u16>,
+
+    /// The amount of time (in seconds) an origin is marked down if it fails to connect.
+    origin_down_time: u64,
+
+    /// The maximum number of times to retry connecting to an origin.
+    connection_retry_limit: u16,
 }
 
 impl Proxy {
@@ -68,9 +84,15 @@ impl Proxy {
         Proxy {
             route_store,
             https_ports,
+            origin_down_time: proxy_config.origin_down_time,
+            connection_retry_limit: proxy_config.connection_retry_limit,
         }
     }
 
+    /// Find the route that matches the request.
+    /// The scheme and host header must match a route's scheme and host exactly.  The path is a
+    /// longest-prefix match.
+    /// If a matching route is found, it is stored in the context.  Else, a 404 error is returned.
     fn find_route(&self, session: &mut Session, ctx: &mut RequestContext) -> Result<()> {
         let host = get_host_header(session)?;
         let path = session.req_header().uri.path();
@@ -89,6 +111,8 @@ impl Proxy {
         Ok(())
     }
 
+    /// Override the host header in the upstream request if the origin configuration has a host
+    /// header override.
     fn override_host_header(
         &self,
         upstream_request: &mut RequestHeader,
@@ -108,36 +132,41 @@ impl Proxy {
         Ok(())
     }
 
+    /// Pick an origin from the origin group of the route using a weighted random selection.
+    /// Origins marked down are not eligible for selection.
+    /// Return the index within the origin group of the selected origin or an error.
     fn select_origin(&self, route: &Arc<Route>) -> Result<usize> {
         let origins = &route.config.origin_group.origins;
         if origins.is_empty() {
-            return Error::e_explain(HTTPStatus(404), "No origins in origin group");
+            return Error::e_explain(HTTPStatus(502), "No origins in origin group");
         }
 
         let mut down_origins: Vec<usize> = Vec::new();
 
         {
-            // If any origins were marked down more than 10 seconds ago, unmark them.
-            // First, take a read lock and check if any were marked down more than 10 seconds ago.
+            // If any origins were marked down more than N seconds ago, unmark them.
+            // First, take a read lock and check if any were marked down more than N seconds ago.
             // Most of the time, we shouldn't find any that need to be unmarked.
             let mut found_expired = false;
             {
                 let state = route.state.read().unwrap();
                 for (_, &timestamp) in state.down_endpoints.iter() {
-                    if timestamp.elapsed() > Duration::from_secs(10) {
+                    if timestamp.elapsed() > Duration::from_secs(self.origin_down_time) {
                         found_expired = true;
                         break;
                     }
                 }
             }
-
             // In the rare chance that any were found, take a write lock and remove them.
             if found_expired {
-                info!("Unmarking origin(s) that were marked down more than 10 seconds ago");
+                info!(
+                    "Unmarking origin(s) that were marked down more than {} seconds ago",
+                    self.origin_down_time
+                );
                 let mut state = route.state.write().unwrap();
                 state
                     .down_endpoints
-                    .retain(|_, v| v.elapsed() <= Duration::from_secs(10));
+                    .retain(|_, v| v.elapsed() <= Duration::from_secs(self.origin_down_time));
             }
 
             // Copy the list of origins still marked down.
@@ -148,7 +177,9 @@ impl Proxy {
         }
 
         // Get a list of eligible origins along with their weights.  The list of eligible origins includes
-        // all the origins that aren't marked down; Or if all origins are marked down, then all are eligible.
+        // all the origins that aren't marked down; Or, if all origins are marked down, then all are eligible.
+        // The data structure is a vector of tuples, where the first element is the index of the origin in the
+        // origin group and the second element is the weight of the origin.
         let mut eligible_origins_and_weights: Vec<(usize, u16)> = Vec::new();
         if down_origins.len() == origins.len() {
             info!("All origins marked down. Picking a down origin");
@@ -173,6 +204,7 @@ impl Proxy {
     }
 }
 
+/// The implementation of the interface between Pingora and the proxy.
 #[async_trait]
 impl ProxyHttp for Proxy {
     type CTX = RequestContext;
@@ -180,11 +212,14 @@ impl ProxyHttp for Proxy {
         RequestContext::new()
     }
 
+    /// The first phase in the request lifetime.  This is where we try to find a matching route
+    /// which will be saved in the request context.
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
         self.find_route(session, ctx)?;
         Ok(false)
     }
 
+    /// Select an origin to forward the request to.
     async fn upstream_peer(
         &self,
         session: &mut Session,
@@ -238,6 +273,8 @@ impl ProxyHttp for Proxy {
         )))
     }
 
+    /// Determine if caching is enabled for this request based on the route configuration.
+    /// Calls `session.cache.enable()` to enable caching.
     fn request_cache_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<()> {
         let Some(route) = &ctx.route else {
             return Ok(());
@@ -255,6 +292,9 @@ impl ProxyHttp for Proxy {
         Ok(())
     }
 
+    /// Modify the request headers before sending them to the upstream server.
+    /// Override the host header in the upstream request if the origin configuration has a host
+    /// header override.
     async fn upstream_request_filter(
         &self,
         _session: &mut Session,
@@ -264,6 +304,9 @@ impl ProxyHttp for Proxy {
         self.override_host_header(upstream_request, ctx)
     }
 
+    /// Handle the case where the connection to the upstream server fails.
+    /// Mark the origin down for a while and specify whether the connection attempt should be
+    /// retried (possibly to a different origin).
     fn fail_to_connect(
         &self,
         _session: &mut Session,
@@ -292,8 +335,8 @@ impl ProxyHttp for Proxy {
         }
 
         // Retry once.
-        if ctx.tries > 1 {
-            info!("Connection retry count exceed");
+        if ctx.tries > self.connection_retry_limit {
+            info!("Connection retry limit exceed");
             return e;
         }
         info!("Retrying connection");
@@ -301,6 +344,8 @@ impl ProxyHttp for Proxy {
         e
     }
 
+    /// Determine if the response should be cached based on the response headers.
+    /// This function is only called if caching was enabled in `request_cache_filter`.
     fn response_cache_filter(
         &self,
         _session: &Session,
@@ -316,6 +361,8 @@ impl ProxyHttp for Proxy {
         ))
     }
 
+    /// Modify the response headers before sending them to the client.
+    /// Insert a header indicating the cache status of the response.
     async fn response_filter(
         &self,
         session: &mut Session,
@@ -347,11 +394,15 @@ impl ProxyHttp for Proxy {
     }
 }
 
+/// Get the host header from the request.  If HTTP/2 or a missing host header, use the "authority"
+/// header or portion of the URI instead.
+/// Return a 400 status code if no header could be found.
 fn get_host_header(session: &Session) -> Result<&str> {
     let host = match session.get_header(http::header::HOST) {
         Some(host_header) => host_header
             .to_str()
             .map_err(|_| Error::explain(HTTPStatus(400), "Non-ascii host header")),
+
         // For HTTP/2, a host header may not be present; check the "authority" instead.
         None => match session.req_header().uri.authority() {
             Some(authority) => Ok(authority.as_str()),
@@ -369,6 +420,8 @@ fn get_host_header(session: &Session) -> Result<&str> {
     host
 }
 
+/// Infer the scheme of the incoming request based on the server port (because Pingora doesn't
+/// directly provide the scheme).
 pub fn get_incoming_scheme(session: &Session, https_ports: &[u16]) -> Result<IncomingScheme> {
     let server_port = session
         .server_addr()

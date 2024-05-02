@@ -1,3 +1,6 @@
+//! The Config API service allows for dynamic configuration changes to the proxy through a REST API.
+//! It supports route and certificate management.
+
 use crate::cert::cert_config::{CertBinding, CertHolder};
 use crate::route_config::{RouteConfig, RouteHolder};
 use async_trait::async_trait;
@@ -10,12 +13,23 @@ use pingora::tls::x509::X509;
 use std::sync::Arc;
 
 pub struct ConfigApi {
+    /// A means to add and delete routes
     route_holder: Arc<dyn RouteHolder>,
+    /// A means to add and delete certificates
     cert_holder: Arc<dyn CertHolder>,
 }
 
 #[async_trait]
 impl ServeHttp for ConfigApi {
+    /// The implementation of the interface between Pingora and the Config API service.  It's
+    /// simple: Pingora receives an HTTP request and calls this method on the ConfigAPI to produce
+    /// a response.  In this case, the response just indicates whether the config change request
+    /// was successfully applied.
+    /// The requested action is determined by the path of the request:
+    /// - /route/add: Add or update a route
+    /// - /route/delete: Delete a route
+    /// - /cert/add: Add a certificate
+    /// - /cert/delete: Delete a certificate
     async fn response(&self, http_stream: &mut ServerSession) -> Response<Vec<u8>> {
         let path = http_stream.req_header().uri.path();
         match path {
@@ -39,6 +53,9 @@ impl ConfigApi {
         }
     }
 
+    /// Add or update (i.e., replace) a route.
+    /// The request body should be a JSON object representing a RouteConfig.
+    /// The request method should be POST.
     async fn add_route(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
         let method = &session.req_header().as_ref().method;
         if method != http::Method::POST {
@@ -67,6 +84,9 @@ impl ConfigApi {
         build_response(StatusCode::OK, "Success\n")
     }
 
+    /// Delete a route.
+    /// The request body should be the name of the route to delete.
+    /// The request method should be POST.
     async fn delete_route(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
         let method = &session.req_header().as_ref().method;
         if method != http::Method::POST {
@@ -91,6 +111,9 @@ impl ConfigApi {
         build_response(StatusCode::OK, "Success\n")
     }
 
+    /// Add a certificate.
+    /// The request body should be a JSON object representing a CertBinding.
+    /// The request method should be POST.
     async fn add_cert(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
         let method = &session.req_header().as_ref().method;
         if method != http::Method::POST {
@@ -128,6 +151,8 @@ impl ConfigApi {
         build_response(StatusCode::OK, "Success\n")
     }
 
+    /// Delete a certificate.
+    /// The request body should be the hostname of the certificate to delete.
     async fn delete_cert(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
         let method = &session.req_header().as_ref().method;
         if method != http::Method::POST {
@@ -153,6 +178,7 @@ impl ConfigApi {
     }
 }
 
+/// Utility function to construct a response byte array given a status code and body.
 fn build_response(status: StatusCode, body: &str) -> Response<Vec<u8>> {
     let body = body.as_bytes().to_vec();
     Response::builder()

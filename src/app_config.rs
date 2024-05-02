@@ -23,9 +23,16 @@ pub struct ProxyConfig {
     /// A list of socket addresses to bind to for HTTP traffic.
     /// Format of each address is `ip:port`.  E.g., `0.0.0.0:80`.
     pub http_bind_addrs: Vec<String>,
+
     /// A list of socket addresses to bind to for HTTP traffic.
     /// Format of each address is `ip:port`.  E.g., `0.0.0.0:443`.
     pub https_bind_addrs: Vec<String>,
+
+    /// The amount of time (in seconds) an origin is marked down if it fails to connect.
+    pub origin_down_time: u64,
+
+    /// The maximum number of times to retry connecting to an origin.
+    pub connection_retry_limit: u16,
 }
 
 /// Cache settings.
@@ -43,14 +50,19 @@ pub struct CacheConfig {
 pub struct ApiConfig {
     /// The socket address to bind to.  Format is `ip:port`.  E.g., `0.0.0.0:5000`.
     pub bind_addr: String,
+
     /// Whether to enable TLS for the API service.
     pub tls: bool,
+
     /// If TLS is enabled, the path to the certificate file.
     pub cert: Option<String>,
+
     /// If TLS is enabled, the path to the private key file.
     pub key: Option<String>,
+
     /// Whether to enable mutual TLS for the API service.
     pub mutual_tls: bool,
+
     /// If mutual TLS is enabled, the path to the client certificate file.
     /// Only clients presenting this certificate will be allowed to connect.
     pub client_cert: Option<String>,
@@ -109,6 +121,8 @@ impl Default for ProxyConfig {
         ProxyConfig {
             http_bind_addrs: vec!["0.0.0.0:8080".to_string()],
             https_bind_addrs: vec!["0.0.0.0:4433".to_string()],
+            origin_down_time: 10,
+            connection_retry_limit: 1,
         }
     }
 }

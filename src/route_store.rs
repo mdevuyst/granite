@@ -1,10 +1,18 @@
+use log::{debug, warn};
 use std::sync::RwLock;
 use std::time::Instant;
 use std::{collections::HashMap, sync::Arc};
 
-use log::{debug, warn};
-
 use crate::route_config::{IncomingScheme, RouteConfig, RouteHolder};
+
+/// A route defines how to route HTTP requests to origin servers.  It includes some configuration
+/// (e.g., a group of origin servers to route to) along with some mutable state (e.g., which origin
+/// servers are currently down).
+#[derive(Debug, Default)]
+pub struct Route {
+    pub config: RouteConfig,
+    pub state: RwLock<RouteState>,
+}
 
 #[derive(Debug, Default)]
 pub struct RouteState {
@@ -12,12 +20,17 @@ pub struct RouteState {
     pub down_endpoints: HashMap<usize, Instant>, // Key: index of down origin, Value: time it was marked down.
 }
 
-#[derive(Debug, Default)]
-pub struct Route {
-    pub config: RouteConfig,
-    pub state: RwLock<RouteState>,
+/// A store for routes.  Routes are indexed by name, host, and path.  They are added and deleted
+/// through the Config API service.  Routes are looked up by the proxy when processing requests.
+pub struct RouteStore {
+    // Protect the set of inter-related data structures that enable fast route lookups, additions,
+    // and deletions with a read-writer lock.  Reads are frequent (for every request), but writes
+    // are infrequent (only when the config API service is used or when some mutable route state
+    // is changed).
+    inner: RwLock<InnerStore>,
 }
 
+/// The inner protected part of the RouteStore.
 struct InnerStore {
     http_host_to_route: HashMap<String, Vec<Arc<Route>>>,
     https_host_to_route: HashMap<String, Vec<Arc<Route>>>,
@@ -34,10 +47,6 @@ impl InnerStore {
     }
 }
 
-pub struct RouteStore {
-    inner: RwLock<InnerStore>,
-}
-
 impl RouteStore {
     pub fn new() -> Self {
         RouteStore {
@@ -45,6 +54,8 @@ impl RouteStore {
         }
     }
 
+    /// Get the route that matches the given protocol, host, and path.  The route with the longest
+    /// matching path is returned.  If no route matches, `None` is returned.
     pub fn get_route(
         &self,
         protocol: IncomingScheme,
@@ -81,6 +92,7 @@ impl RouteStore {
 }
 
 impl RouteHolder for RouteStore {
+    /// Add or replace a route.
     fn add_route(&self, route_config: RouteConfig) {
         let mut inner = self.inner.write().unwrap();
 
@@ -137,6 +149,7 @@ impl RouteHolder for RouteStore {
         }
     }
 
+    /// Delete a route (if it exists)
     fn delete_route(&self, name: &str) {
         let mut inner = self.inner.write().unwrap();
 

@@ -1,8 +1,6 @@
 //! The Config API service allows for dynamic configuration changes to the proxy through a REST API.
 //! It supports route and certificate management.
 
-use crate::cert::cert_config::{CertBinding, CertHolder};
-use crate::route_config::{RouteConfig, RouteHolder};
 use async_trait::async_trait;
 use http::{Response, StatusCode};
 use log::{error, info};
@@ -11,6 +9,9 @@ use pingora::protocols::http::ServerSession;
 use pingora::tls::pkey::PKey;
 use pingora::tls::x509::X509;
 use std::sync::Arc;
+
+use crate::cert::cert_config::{CertBinding, CertHolder};
+use crate::route_config::{RouteConfig, RouteHolder};
 
 pub struct ConfigApi {
     /// A means to add and delete routes

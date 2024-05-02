@@ -1,7 +1,11 @@
+//! A dynamically configurable HTTP caching proxy.
+//!
 use pingora::listeners::TlsSettings;
 use pingora::prelude::*;
 use pingora::services::{listening::Service as ListeningService, Service};
 use pingora::tls::ssl::SslVerifyMode;
+use std::path::Path;
+use std::process;
 use std::sync::Arc;
 
 mod app_config;
@@ -12,21 +16,33 @@ mod route_config;
 mod route_store;
 mod utils;
 
+use crate::app_config::{ApiConfig, AppConfig};
 use crate::cert::{cert_provider::CertProvider, cert_store::CertStore};
-use app_config::{ApiConfig, AppConfig};
-use config_api::ConfigApi;
-use proxy::Proxy;
-use route_store::RouteStore;
+use crate::config_api::ConfigApi;
+use crate::proxy::Proxy;
+use crate::route_store::RouteStore;
 
+/// Create and run two services (along with all the necessary dependencies):
+/// 1. An HTTP caching proxy service.
+/// 2. A config API service that accepts configuration changes (e.g., routes, certificates).
+/// Some options are supplied on the command line, and the rest are read from a configuration file.
+/// See the user guide for more details on all the available options.
 fn main() {
     env_logger::init();
 
     let opt = Opt::default();
     let conf_file = opt.conf.as_ref().map(|p| p.to_string());
     let conf = match conf_file.as_ref() {
-        // TODO: Check that the file exists before trying to load it.  If it doesn't exist, print
-        // an error message and exit.
-        Some(file) => AppConfig::load_from_yaml(file).unwrap(),
+        Some(file) => {
+            if !Path::new(file).exists() {
+                eprintln!("Config file not found: {file}");
+                process::exit(1);
+            }
+            AppConfig::load_from_yaml(file).unwrap_or_else(|e| {
+                eprintln!("Failed to load config file: {file} error: {e}");
+                process::exit(1);
+            })
+        }
         None => AppConfig::default(),
     };
 
@@ -56,6 +72,9 @@ fn main() {
     server.run_forever();
 }
 
+/// Create a config API service to apply dynamic configuration changes.
+/// It can run over HTTP or HTTPS and can also authenticate the caller using mutual TLS, depending
+/// on the configuration.
 fn create_config_api(
     api_config: &ApiConfig,
     route_store: Arc<RouteStore>,

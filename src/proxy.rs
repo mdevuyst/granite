@@ -266,11 +266,18 @@ impl ProxyHttp for Proxy {
 
         ctx.tries += 1;
 
-        Ok(Box::new(HttpPeer::new(
+        let mut peer = Box::new(HttpPeer::new(
             (origin.host.as_str(), outgoing_port),
             use_tls,
             sni,
-        )))
+        ));
+
+        // If using HTTP/2, try HTTP/2 but fall back to HTTP/1.1 if it fails.
+        if use_tls {
+            peer.options.set_http_version(2, 1);
+        }
+
+        Ok(peer)
     }
 
     /// Determine if caching is enabled for this request based on the route configuration.

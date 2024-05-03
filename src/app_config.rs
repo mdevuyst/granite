@@ -149,3 +149,84 @@ impl Default for ApiConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_yaml() {
+        let yaml = r#"
+            proxy:
+              http_bind_addrs:
+                - 127.0.0.1:81
+                - 127.0.0.2:82
+              https_bind_addrs:
+                - 0.0.0.0:443
+              origin_down_time: 5
+              connection_retry_limit: 2
+            cache:
+              max_size: 5000000
+            api:
+              bind_addr: 127.0.1.5:6000
+              tls: true
+              cert: /path/to/api.crt
+              key: /path/to/api.key
+              mutual_tls: true
+              client_cert: /path/to/client.crt
+        "#;
+        let conf = AppConfig::from_yaml(yaml).unwrap();
+        assert_eq!(
+            conf,
+            AppConfig {
+                proxy: ProxyConfig {
+                    http_bind_addrs: vec!["127.0.0.1:81".to_string(), "127.0.0.2:82".to_string()],
+                    https_bind_addrs: vec!["0.0.0.0:443".to_string()],
+                    origin_down_time: 5,
+                    connection_retry_limit: 2,
+                },
+                cache: CacheConfig { max_size: 5000000 },
+                api: ApiConfig {
+                    bind_addr: "127.0.1.5:6000".to_string(),
+                    tls: true,
+                    cert: Some("/path/to/api.crt".to_string()),
+                    key: Some("/path/to/api.key".to_string()),
+                    mutual_tls: true,
+                    client_cert: Some("/path/to/client.crt".to_string()),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn missing_cert() {
+        let yaml = r#"
+            api:
+              tls: true
+              key: /path/to/api.key
+        "#;
+        assert!(AppConfig::from_yaml(yaml).is_err());
+    }
+
+    #[test]
+    fn missing_key() {
+        let yaml = r#"
+            api:
+              tls: true
+              cert: /path/to/api.crt
+        "#;
+        assert!(AppConfig::from_yaml(yaml).is_err());
+    }
+
+    #[test]
+    fn missing_client_cert() {
+        let yaml = r#"
+            api:
+              tls: true
+              cert: /path/to/api.crt
+              key: /path/to/api.key
+              mutual_tls: true
+        "#;
+        assert!(AppConfig::from_yaml(yaml).is_err());
+    }
+}

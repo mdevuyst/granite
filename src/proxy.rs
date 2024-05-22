@@ -15,6 +15,7 @@ use rand::distributions::{Distribution, WeightedIndex};
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::net::lookup_host;
 
 use crate::app_config::{CacheConfig, ProxyConfig};
 use crate::route_config::{IncomingScheme, Origin, OutgoingScheme};
@@ -266,11 +267,14 @@ impl ProxyHttp for Proxy {
 
         ctx.tries += 1;
 
-        let mut peer = Box::new(HttpPeer::new(
-            (origin.host.as_str(), outgoing_port),
-            use_tls,
-            sni,
-        ));
+        // Async DNS resolution.  For now, we only use the first address found.
+        let addr = lookup_host((origin.host.as_str(), outgoing_port))
+            .await
+            .or_else(|e| Error::e_because(HTTPStatus(502), "Unable to resolve host", e))?
+            .next()
+            .ok_or_else(|| Error::explain(HTTPStatus(502), "No address found"))?;
+
+        let mut peer = Box::new(HttpPeer::new(addr, use_tls, sni));
 
         // If using HTTP/2, try HTTP/2 but fall back to HTTP/1.1 if it fails.
         if use_tls {

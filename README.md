@@ -2,11 +2,6 @@
 
 An HTTP proxy built on [Pingora](https://github.com/cloudflare/pingora).
 
-
-<img src="https://github.com/mdevuyst/granite/blob/c2819c9d7c7506f2bf96b194e220a1b72d6879e0/granite.png" alt="logo" width="512"/>
-
-![logo](https://github.com/mdevuyst/granite/blob/c2819c9d7c7506f2bf96b194e220a1b72d6879e0/granite.png)
-
 ## Features
 
 - Configuration API for dynamically managing routes and certificates.

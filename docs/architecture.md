@@ -4,7 +4,7 @@ TODO: Describe the architecture of the project.  Include a diagram and briefly
 explain each component.
 
 
-:::mermaid
+```mermaid
 flowchart TD
   subgraph "Granite"
     subgraph "Proxy Service"
@@ -24,4 +24,4 @@ flowchart TD
   client -->|TLS Handshake| CertProvider
   client -->|HTTP| Proxy
   admin -->|Config| ConfigApi
-:::
+```

@@ -16,7 +16,6 @@ pub struct Route {
 
 #[derive(Debug, Default)]
 pub struct RouteState {
-    // TODO: Utilize this struct for route state.
     pub down_endpoints: HashMap<usize, Instant>, // Key: index of down origin, Value: time it was marked down.
 }
 

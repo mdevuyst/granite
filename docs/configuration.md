@@ -1,8 +1,17 @@
 # Configuration
 
+Configuration is divided into two parts: static and dynamic.  The static configuration is read from
+a file when the server starts and is used to configure the server itself.  The dynamic configuration
+is managed through an API and is used to configure routes and certificates.
+
 ## Static app configuration
 
-The configuration file is in YAML.  The following options are supported:
+The configuration file (YAML) is given with the command-line option `--conf` (or `-c`).  The config file is divided into
+sections, each with its own set of options.
+
+### Top-level options
+
+These include all the Pingora options, most of which are listed here:
 
 Name | Type | Required? | Default value | Description
 --|--|--|--|--
@@ -16,12 +25,36 @@ user | string | Optional | N/A | The user the server should be run under after d
 group | string | Optional | N/A | The group the server should be run under after daemonization
 ca_file | string | Optional | N/A | The path to the root CA file
 work_stealing | bool | Optional | true | Enable work stealing runtime
-upstream_keepalive_pool_size | Optional | 128 | The number of total connections to keep in the connection pool
-proxy.http_bind_addrs | vector of strings | Optional | 0.0.0.0:8080 | The HTTP socket addresses to listen on
-proxy.https_bind_addrs | vector of strings | Optional | 0.0.0.0:4433 | The HTTPS socket addresses to listen on
-proxy.origin_down_time | number | Optional | 10 | How long (in seconds) to mark an origin down on connection failure
-proxy.connection_retry_limit | number | Optional | 1 | The maximum number of times to retry connecting to an origin
+upstream_keepalive_pool_size | number | Optional | 128 | The number of total connections to keep in the connection pool
+
+See the [Pingora documentation](https://docs.rs/pingora-core/latest/pingora_core/server/configuration/struct.ServerConf.html)
+for the full list of options.
+
+### Proxy options
+
+These options appear in the `proxy` section of the configuration file.
+
+Name | Type | Required? | Default value | Description
+--|--|--|--|--
+http_bind_addrs | vector of strings | Optional | 0.0.0.0:8080 | The HTTP socket addresses to listen on
+https_bind_addrs | vector of strings | Optional | 0.0.0.0:4433 | The HTTPS socket addresses to listen on
+origin_down_time | number | Optional | 10 | How long (in seconds) to mark an origin down on connection failure
+connection_retry_limit | number | Optional | 1 | The maximum number of times to retry connecting to an origin
+
+### Cache options
+
+These options appear in the `cache` section of the configuration file.
+
+Name | Type | Required? | Default value | Description
+--|--|--|--|--
 cache.max_size | number | Optional | 104857600 (100 MB) | The maximum cache size in bytes
+
+### Config API options
+
+These options appear in the `api` section of the configuration file.
+
+Name | Type | Required? | Default value | Description
+--|--|--|--|--
 api.bind_addr | string | Optional | 0.0.0.0:5000 | The socket address for the config API to listen on
 api.tls | bool | Optional | false | Whether to use TLS for the config API
 api.cert | string | Optional | N/A | Path to the certificate file for the config API
@@ -31,6 +64,9 @@ api.mutual_tls | bool | Optional | false | If mutual TLS is enabled, the path to
 Example configuration: [conf.yaml](../examples/conf.yaml)
 
 ## Configuration API
+
+The configuration API is a RESTful API that allows you to add, update, and delete routes and
+certificate bindings.
 
 ### POST `/route/add`
 
@@ -58,7 +94,7 @@ host_header_override | string | Optional | N/A | The Host header to use when com
 sni | string | Optional | N/A | The SNI to use when communicating with the origin
 weight | number | Optional | 10 | The relative weight of the origin in the origin group
 
-Example route to httpbin.org: [route-httpbin.json](../examples/route-httpbin.json)
+Example route: [route-forward.json](../examples/route-forward.json)
 
 ### POST `route/delete`
 
@@ -74,10 +110,9 @@ host | string | Required | N/A | The incoming SNI to bind the certificate to
 cert | string | Required | N/A | Path to the certificate file
 key | string | Required | N/A | Path to the key file
 
+The tool [`create_cert_binding_json.py`](../examples/create_cert_binding_json.py) can be used to
+generate the JSON binding object from a certificate and key file.
+
 ### POST `cert/delete`
 
 Delete a certificate binding.  The request body should contain the host/SNI of the bound certificate
-
-## Utilities
-
-TODO: Describe any tools to help bootstrap configuration.

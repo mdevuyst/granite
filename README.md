@@ -1,6 +1,6 @@
 # granite
 
-An HTTP proxy built on Pingora
+An HTTP proxy built on [Pingora](https://github.com/cloudflare/pingora).
 
 TODO: Add a logo.
 

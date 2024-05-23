@@ -1,6 +1,5 @@
-# Threads per service.
 threads: 2
-upstream_debug_ssl_keylog: true
+daemon: false
 
 proxy:
   http_bind_addrs:
@@ -8,10 +7,9 @@ proxy:
   https_bind_addrs:
   - 0.0.0.0:4433
 
-# api:
-#   tls: true
-#   cert: api.crt
-#   key: api.key
-
 cache:
   max_size: 100000000
+
+api:
+  bind_addr: 0.0.0.0:5000
+  tls: false

@@ -19,7 +19,7 @@ TODO: Add a logo.
 
 ```bash
 # Start the server
-RUST_LOG=info cargo run -- -d
+RUST_LOG=info cargo run -- --daemon
 
 # Add a simple forwarding route
 curl -v -d @examples/route-forward.json http://127.0.0.1:5000/route/add
@@ -73,7 +73,7 @@ cargo build
 
 ```bash
 # Start the server
-RUST_LOG=info cargo run -- -d
+RUST_LOG=info cargo run -- --daemon
 
 # Add a simple caching route
 curl -v -d @examples/route-cache.json http://127.0.0.1:5000/route/add
@@ -94,7 +94,7 @@ pkill -INT granite
 
 ```bash
 # Start the server
-RUST_LOG=info cargo run -- -d
+RUST_LOG=info cargo run -- --daemon
 
 # Add a certificate binding for host `ssl`.
 # First, for demonstration purposes, create a self-signed certificate and key.
@@ -133,7 +133,7 @@ api:
 EOF
 
 # Start the server
-RUST_LOG=info cargo run -- -d --conf conf.yaml
+RUST_LOG=info cargo run -- --daemon --conf conf.yaml
 
 # Add a route
 curl -v \
@@ -149,6 +149,29 @@ curl -v --connect-to ::127.0.0.1:8080 http://forward/get
 # Stop the server and clean up the generated files
 pkill -INT granite
 rm api.crt api.key client.crt client.key conf.yaml
+```
+
+### Multiple origins (one bad, one good)
+
+```bash
+# Start the server
+RUST_LOG=info cargo run -- --daemon
+
+# Add a route with two origins, one of which is unreachable.  The bad origin has a much higher
+# weight than the good origin, so the proxy is more likely to try the bad origin first.
+curl -v -d @examples/route-badorigin.json http://127.0.0.1:5000/route/add
+
+# Send a request through the proxy.  The proxy will attempt to connect to the bad origin.
+# When that fails, it will mark the bad origin as down for 10 seconds, and try the good origin,
+# which will succeed.
+curl -v --connect-to ::127.0.0.1:8080 http://badorigin/get
+
+# Send the same request again.  If it's been less than 10 seconds since the last request, the proxy
+# will only try the good origin because the bad origin is still marked down.
+curl -v --connect-to ::127.0.0.1:8080 http://badorigin/get
+
+# Stop the server
+pkill -INT granite
 ```
 
 ## Internals

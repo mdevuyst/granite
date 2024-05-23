@@ -203,6 +203,19 @@ impl Proxy {
         let index_into_eligible_origins = dist.sample(&mut rng);
         Ok(eligible_origins_and_weights[index_into_eligible_origins].0)
     }
+
+    fn mark_origin_down(route: &Route, origin_index: usize) -> Result<()> {
+        let mut state = route.state.write().unwrap();
+        let origins = &route.config.origin_group.origins;
+        if origins.is_empty() {
+            return Err(Error::new_str("No origins in origin group"));
+        }
+        if let Entry::Vacant(e) = state.down_endpoints.entry(origin_index) {
+            info!("Marking origin '{}' down", &origins[origin_index].host);
+            let _ = e.insert(Instant::now());
+        }
+        Ok(())
+    }
 }
 
 /// The implementation of the interface between Pingora and the proxy.
@@ -267,12 +280,24 @@ impl ProxyHttp for Proxy {
 
         ctx.tries += 1;
 
-        // Async DNS resolution.  For now, we only use the first address found.
-        let addr = lookup_host((origin.host.as_str(), outgoing_port))
-            .await
-            .or_else(|e| Error::e_because(HTTPStatus(502), "Unable to resolve host", e))?
-            .next()
-            .ok_or_else(|| Error::explain(HTTPStatus(502), "No address found"))?;
+        // Resolve the host to an IP address (asynchronously).
+        // Note: `HttpPeer::new` can also do this, but it is blocking.
+        let addr = match lookup_host((origin.host.as_str(), outgoing_port)).await {
+            // For now, we only use the first address found.
+            Ok(mut addrs) => addrs
+                .next()
+                .ok_or_else(|| Error::explain(HTTPStatus(502), "No address found"))?,
+            Err(e) => {
+                // Mark the origin down and return an error.  If the connection attempt should be
+                // retried, Pingora will call `upstream_peer` again
+                Self::mark_origin_down(route, origin_index).expect("Expect at least one origin");
+                let mut e = Error::because(HTTPStatus(502), "Unable to resolve host", e);
+                if ctx.tries <= self.connection_retry_limit {
+                    e.set_retry(true);
+                }
+                return Err(e);
+            }
+        };
 
         let mut peer = Box::new(HttpPeer::new(addr, use_tls, sni));
 
@@ -336,13 +361,8 @@ impl ProxyHttp for Proxy {
             return e;
         };
 
-        // Mark the origin down for a while.
-        {
-            let mut state = route.state.write().unwrap();
-            if let Entry::Vacant(e) = state.down_endpoints.entry(origin_index) {
-                info!("Marking origin '{}' down", &origins[origin_index].host);
-                let _ = e.insert(Instant::now());
-            }
+        if Self::mark_origin_down(route, origin_index).is_err() {
+            return e;
         }
 
         // Retry once.

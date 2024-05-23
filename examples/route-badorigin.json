@@ -1,0 +1,27 @@
+{
+    "name": "route-badorigin",
+    "description": "A forwarding route that sends two origins (one of which is unresponsive)",
+    "customer": "BadOriginCustomer",
+    "hosts": [
+        "badorigin"
+    ],
+    "paths": [
+        "/"
+    ],
+    "incoming_schemes": [
+        "Http"
+    ],
+    "origin_group": {
+        "origins": [
+            {
+                "host": "expect.name.resolution.failure",
+                "weight": 10000
+            },
+            {
+                "host": "httpbin.org",
+                "host_header_override": "httpbin.org",
+                "weight": 1
+            }
+        ]
+    }
+}

@@ -1,7 +1,10 @@
 //! A dynamically configurable HTTP caching proxy.
 //!
+use log::info;
 use pingora::listeners::TlsSettings;
-use pingora::prelude::*;
+use pingora::prelude::http_proxy_service;
+use pingora::prelude::Opt as CommandLineOptions;
+use pingora::server::Server;
 use pingora::services::{listening::Service as ListeningService, Service};
 use pingora::tls::ssl::SslVerifyMode;
 use std::path::Path;
@@ -30,9 +33,8 @@ use crate::route_store::RouteStore;
 fn main() {
     env_logger::init();
 
-    let opt = Opt::default();
-    let conf_file = opt.conf.as_ref().map(|p| p.to_string());
-    let conf = match conf_file.as_ref() {
+    let opt = CommandLineOptions::default();
+    let conf = match opt.conf.as_ref() {
         Some(file) => {
             if !Path::new(file).exists() {
                 eprintln!("Config file not found: {file}");
@@ -57,12 +59,14 @@ fn main() {
     let proxy = Proxy::new(&conf.proxy, &conf.cache, route_store.clone());
     let mut proxy_service = http_proxy_service(&server.configuration, proxy);
     for addr in &conf.proxy.http_bind_addrs {
+        info!("Adding proxy HTTP listener on {addr}");
         proxy_service.add_tcp(addr);
     }
     for addr in &conf.proxy.https_bind_addrs {
         let cert_provider = CertProvider::new(cert_store.clone());
         let mut tls_settings = TlsSettings::with_callbacks(cert_provider).unwrap();
         tls_settings.enable_h2();
+        info!("Adding proxy HTTPS listener on {addr}");
         proxy_service.add_tls_with_settings(addr, None, tls_settings);
     }
 
@@ -76,31 +80,37 @@ fn main() {
 /// It can run over HTTP or HTTPS and can also authenticate the caller using mutual TLS, depending
 /// on the configuration.
 fn create_config_api(
-    api_config: &ApiConfig,
+    config: &ApiConfig,
     route_store: Arc<RouteStore>,
     cert_store: Arc<CertStore>,
 ) -> Box<dyn Service> {
     let config_api = Arc::new(ConfigApi::new(route_store, cert_store));
     let mut config_api_service =
-        ListeningService::new("Config API service".to_string(), config_api.clone());
+        ListeningService::new("Config API service".to_string(), config_api);
 
-    if api_config.tls {
-        let cert_file = api_config.cert.as_ref().unwrap();
-        let key_file = api_config.key.as_ref().unwrap();
+    if config.tls {
+        let cert_file = config.cert.as_ref().unwrap();
+        let key_file = config.key.as_ref().unwrap();
 
         let mut tls_settings = TlsSettings::intermediate(cert_file, key_file).unwrap();
         tls_settings.enable_h2();
 
-        if api_config.mutual_tls {
-            let client_cert_file = api_config.client_cert.as_ref().unwrap();
+        if config.mutual_tls {
+            let client_cert_file = config.client_cert.as_ref().unwrap();
             tls_settings.set_ca_file(client_cert_file).unwrap();
             tls_settings.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
         }
 
-        config_api_service.add_tls_with_settings(api_config.bind_addr.as_str(), None, tls_settings);
+        config_api_service.add_tls_with_settings(config.bind_addr.as_str(), None, tls_settings);
     } else {
-        config_api_service.add_tcp(api_config.bind_addr.as_str());
+        config_api_service.add_tcp(config.bind_addr.as_str());
     }
+    info!(
+        "Adding Config API on {} TLS: {} mTLS: {}",
+        config.bind_addr.as_str(),
+        config.tls,
+        config.mutual_tls
+    );
 
     Box::new(config_api_service)
 }

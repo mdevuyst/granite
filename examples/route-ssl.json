@@ -1,0 +1,25 @@
+{
+    "name": "route-ssl",
+    "description": "A HTTPS forwarding route that sends all traffic to httpbin.org",
+    "customer": "SslCustomer",
+    "hosts": [
+        "ssl"
+    ],
+    "paths": [
+        "/"
+    ],
+    "incoming_schemes": [
+        "Http",
+        "Https"
+    ],
+    "outgoing_scheme": "MatchIncoming",
+    "origin_group": {
+        "origins": [
+            {
+                "host": "httpbin.org",
+                "host_header_override": "httpbin.org",
+                "sni": "httpbin.org"
+            }
+        ]
+    }
+}

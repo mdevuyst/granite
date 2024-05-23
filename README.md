@@ -15,6 +15,22 @@ TODO: Add a logo.
 - Origin connection retries.
 - Custom SNI and Host header.
 
+## Quickstart
+
+```bash
+# Start the server
+RUST_LOG=info cargo run -- -d
+
+# Add a simple forwarding route
+curl -v -d @examples/route-forward.json http://127.0.0.1:5000/route/add
+
+# Send a request through the proxy
+curl -v --connect-to ::127.0.0.1:8080 http://forward/get
+
+# Stop the server
+pkill -INT granite
+```
+
 ## Usage
 
 ```
@@ -49,6 +65,90 @@ configuration (for routes and certificates) are documented here: [configuration]
 
 ```bash
 cargo build
+```
+
+## Examples
+
+### Caching
+
+```bash
+# Start the server
+RUST_LOG=info cargo run -- -d
+
+# Add a simple caching route
+curl -v -d @examples/route-cache.json http://127.0.0.1:5000/route/add
+
+# Send a request through the proxy.
+# Notice the `x-cache-status: miss` header in the response.
+curl -v --connect-to ::127.0.0.1:8080 http://cache/get
+
+# Send the same request again and expect a cache hit.
+# Notice the `x-cache-status: hit` header in the response.
+curl -v --connect-to ::127.0.0.1:8080 http://cache/get
+
+# Stop the server
+pkill -INT granite
+```
+
+### SSL termination
+
+```bash
+# Start the server
+RUST_LOG=info cargo run -- -d
+
+# Add a certificate binding for host `ssl`.
+# First, for demonstration purposes, create a self-signed certificate and key.
+# Then, wrap the certificate, key, and hostname in a JSON object representing the binding.
+# Finally, send the JSON object to the configuration API.
+openssl req -x509 -new -nodes -subj "/CN=ssl" -out ssl.crt -keyout ssl.key
+python3 examples/create_cert_binding_json.py --host ssl --cert ssl.crt --key ssl.key --output ssl.json
+curl -v -d @ssl.json http://127.0.0.1:5000/cert/add
+
+# Add a route for host `ssl`
+curl -v -d @examples/route-ssl.json http://127.0.0.1:5000/route/add
+
+# Send a request through the proxy.
+curl -v -k --connect-to ::127.0.0.1:4433 https://ssl/get
+
+# Stop the server and clean up the generated files
+pkill -INT granite
+rm ssl.crt ssl.key ssl.json
+```
+
+### Mutual TLS on configuration API
+
+```bash
+# Create a self-signed certificate and key for the client and server.
+openssl req -x509 -new -nodes -subj "/CN=api" -out api.crt -keyout api.key
+openssl req -x509 -new -nodes -subj "/CN=client" -out client.crt -keyout client.key
+
+# Create a configuration file with mutual TLS enabled.
+cat << EOF > conf.yaml
+api:
+  tls: true
+  mutual_tls: true
+  cert: api.crt
+  key: api.key
+  client_cert: client.crt
+EOF
+
+# Start the server
+RUST_LOG=info cargo run -- -d --conf conf.yaml
+
+# Add a route
+curl -v \
+  --cacert api.crt \
+  --cert client.crt --key client.key \
+  -d @examples/route-forward.json \
+  --connect-to ::127.0.0.1:5000 \
+  https://api/route/add
+
+# Send a request through the proxy
+curl -v --connect-to ::127.0.0.1:8080 http://forward/get
+
+# Stop the server and clean up the generated files
+pkill -INT granite
+rm api.crt api.key client.crt client.key conf.yaml
 ```
 
 ## Internals

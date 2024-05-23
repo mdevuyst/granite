@@ -1,0 +1,22 @@
+{
+    "name": "route-forward",
+    "description": "A forwarding route that sends all traffic to httpbin.org",
+    "customer": "ForwardCustomer",
+    "hosts": [
+        "forward"
+    ],
+    "paths": [
+        "/"
+    ],
+    "incoming_schemes": [
+        "Http"
+    ],
+    "origin_group": {
+        "origins": [
+            {
+                "host": "httpbin.org",
+                "host_header_override": "httpbin.org"
+            }
+        ]
+    }
+}
